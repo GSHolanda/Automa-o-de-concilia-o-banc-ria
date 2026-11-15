@@ -2,7 +2,9 @@ import type { RouteDefinition } from './http/route';
 import { routes as access } from './modules/access/routes';
 import { routes as audit } from './modules/audit/routes';
 import { routes as auth } from './modules/auth/routes';
+import { routes as imports } from './modules/imports/routes';
+import { routes as jobs } from './modules/jobs/routes';
 import { routes as platform } from './modules/platform/routes';
 
 /** Lista central das rotas da API. Cada módulo novo entra aqui. */
-export const routes: readonly RouteDefinition[] = [...auth, ...access, ...audit, ...platform];
+export const routes: readonly RouteDefinition[] = [...auth, ...access, ...audit, ...platform, ...jobs, ...imports];
