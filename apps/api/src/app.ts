@@ -50,6 +50,16 @@ function frameworkError(error: FastifyError): AppError | null {
   }
 }
 
+/** Converte o erro em resposta prevista; nulo quando é um erro inesperado (500). */
+function toAppError(error: unknown): AppError | null {
+  if (error instanceof AppError) return error;
+  if (error instanceof z.ZodError) {
+    const details = error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message }));
+    return new AppError(400, 'validation_error', 'Dados inválidos.', details);
+  }
+  return fromDatabaseError(error) ?? frameworkError(error as FastifyError);
+}
+
 export async function buildApp(config: Config): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -133,24 +143,12 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
     );
   });
 
+  // Manipuladores síncronos: enviam a resposta e não devolvem o objeto reply.
   app.setErrorHandler((error, req, reply) => {
-    if (error instanceof AppError) {
-      return reply.code(error.status).send(errorBody(error.code, error.message, req.id, error.details));
-    }
-    if (error instanceof z.ZodError) {
-      const details = error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message }));
-      return reply.code(400).send(errorBody('validation_error', 'Dados inválidos.', req.id, details));
-    }
-    const database = fromDatabaseError(error);
-    if (database) {
-      return reply.code(database.status).send(errorBody(database.code, database.message, req.id, database.details));
-    }
-    const framework = frameworkError(error as FastifyError);
-    if (framework) {
-      return reply.code(framework.status).send(errorBody(framework.code, framework.message, req.id));
-    }
-    req.log.error({ err: error }, 'erro não tratado');
-    return reply.code(500).send(errorBody('internal_error', 'Erro interno. Tente novamente mais tarde.', req.id));
+    const known = toAppError(error);
+    if (!known) req.log.error({ err: error }, 'erro não tratado');
+    const sent = known ?? new AppError(500, 'internal_error', 'Erro interno. Tente novamente mais tarde.');
+    void reply.code(sent.status).send(errorBody(sent.code, sent.message, req.id, sent.details));
   });
 
   // Infraestrutura (fora do prefixo da API)
@@ -198,9 +196,10 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
     const path = req.url.split('?')[0] ?? '';
     const isApi = path === API_PREFIX || path.startsWith(`${API_PREFIX}/`) || path.startsWith('/api/');
     if (serveWeb && req.method === 'GET' && !isApi) {
-      return reply.header('cache-control', 'no-cache').sendFile('index.html');
+      void reply.header('cache-control', 'no-cache').sendFile('index.html');
+      return;
     }
-    return reply.code(404).send(errorBody('not_found', 'Recurso não encontrado.', req.id));
+    void reply.code(404).send(errorBody('not_found', 'Recurso não encontrado.', req.id));
   });
 
   return app;

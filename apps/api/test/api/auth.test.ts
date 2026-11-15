@@ -27,7 +27,8 @@ describe('login', () => {
     expect(response.body.role.key).toBe('admin');
     expect(response.body.permissions).toContain('users.manage');
     expect(response.body.csrfToken).toMatch(/^[0-9a-f]{64}$/);
-    expect(JSON.stringify(response.body)).not.toMatch(/password|hash/i);
+    expect(response.body.user.mustChangePassword).toBe(false);
+    expect(JSON.stringify(response.body)).not.toMatch(/password_?hash|scrypt\$/i);
 
     const cookie = String(response.headers['set-cookie']);
     expect(cookie).toMatch(/concilia_sid=/);

@@ -32,5 +32,11 @@ Modelo e esforço são os informados pelo ambiente. Custo só aparece quando há
 | Etapa | Agente | Modelo | Esforço | Resultado | Testes | Escalonou |
 |---|---|---|---|---|---|---|
 | 1–2 e início da 3 (E1–E4, parte da E5) | orquestrador | claude-fable-5-2 | xhigh | Domínio, migrações, base da API | core 171, banco 31, todos passando | — |
+| 7 (operação) | arquivos de operação | haiku (solicitado) | low | `.env.example`, Docker, compose, CI, backup, alertas | sintaxe de shell e YAML conferida; Docker não executado neste ambiente | não |
+| 4 (base) | base da interface | sonnet (solicitado) | medium | Componentes, autenticação, navegação por permissão | build do web passa | não |
+| 3 (E5) | acesso e sessões | opus (solicitado) | high | Login, sessões, usuários, papéis, auditoria, plataforma, CLI | API 53 testes passando; typecheck limpo | não |
+
+Modelo "solicitado": o ambiente aceitou o parâmetro na delegação, mas não informa o modelo que atendeu.
+Consumo informado pelo ambiente por subagente: operação 88 mil tokens; base web 120 mil; E5 208 mil.
 
 Custo real da sessão do orquestrador até este ponto, informado pelo ambiente: US$ 16,60.
