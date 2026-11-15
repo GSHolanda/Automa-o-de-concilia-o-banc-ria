@@ -1,0 +1,40 @@
+{
+  "name": "@concilia/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "worker": "tsx src/worker-main.ts",
+    "cli": "tsx src/cli.ts",
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@concilia/core": "workspace:*",
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/helmet": "^13.2.0",
+    "@fastify/multipart": "^10.1.8",
+    "@fastify/rate-limit": "^11.2.2",
+    "@fastify/static": "^10.1.11",
+    "exceljs": "^4.4.0",
+    "fastify": "^5.12.8",
+    "nodemailer": "^10.6.0",
+    "pdfkit": "^0.20.2",
+    "pg": "^8.23.1",
+    "prom-client": "^15.1.3",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pdfkit": "^0.17.7",
+    "@types/pg": "^8.23.1",
+    "tsup": "^9.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
