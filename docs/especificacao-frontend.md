@@ -45,3 +45,24 @@ Estados vazios, de carregamento e de erro em toda lista. Ações destrutivas ped
 | `/plataforma/empresas` | Operador: empresas, plano e licença | `/platform/*` |
 
 Itens de menu e botões respeitam permissão e módulo; licença em somente leitura mostra faixa de aviso e desabilita escrita.
+
+## Componentes disponíveis (base já implementada)
+Rotas: tabela `APP_ROUTES` e `SETTINGS_ROUTES` em `apps/web/src/routes.tsx` (`permission`, `module`, `element`).
+Uma tela nova entra trocando o `element` da rota (hoje `stub(...)`), uma linha por rota. Telas em `src/features/<área>/`.
+
+- `api` (`src/api/client.ts`): `get/post/put/patch/delete/upload(path, FormData)/download(path, query, nome)`;
+  `ApiError {status, code, message, details, requestId}`; `errorMessage(erro)`.
+- `useAuth()`: `me, status, can(permissão), hasModule(chave), readOnly, login, logout, refresh`.
+  `RequirePermission` (`permission`, `anyOf`, `module`, `platform`).
+- `DataTable<T>`: `columns[{key, header, render?, align?, width?, sortable?, hideOnMobile?}]`, `rows`, `rowKey`,
+  `caption` (obrigatório), `loading`, `error`, `onRetry`, `emptyTitle`, `emptyDescription`, `emptyAction`,
+  `onRowClick`, `selectedKeys` + `onSelectionChange`, `sort` + `onSortChange`, `footer`.
+- `Field`: `label` (obrigatório), `hint`, `error`, `multiline` e atributos de input. `FieldShell` para controles
+  próprios. `Select`: `label, options[{value,label,disabled}], placeholder, hint, error`. `Checkbox`: `label, hint`.
+- `Modal`: `open, title, onClose, footer?, size?: sm|md|lg, dismissible?`. `Drawer`: `open, title, onClose, footer?,
+  side?, width?: md|lg|xl`. `ConfirmDialog`: `open, title, message, confirmLabel, destructive, onConfirm, onCancel`.
+- `useToast()`: `success(msg)`, `error(msg)`, `info(msg)`.
+- `Button`: `variant: primary|secondary|danger|ghost`, `size`, `loading`. `Tabs`: `tabs[{key,label,count?}], value,
+  onChange, label`. `Pagination` (cursor): `hasPrev, hasNext, onPrev, onNext, summary, loading`.
+- `StatusBadge`: `status`, `label?`. `Money`: `cents`. `DateText`: `value, withTime?`. `FileDrop`: `onFiles, accept,
+  multiple, maxSizeMb, onReject`. `PageHeader`, `EmptyState`, `Spinner`, `Badge`.

@@ -15,7 +15,13 @@ import { csrfTokenFor, safeEqual } from '../security/tokens';
 import { AppError, forbidden, unauthenticated } from './errors';
 import { authenticateApiToken, authenticateSession, type AuthContext } from './auth';
 
-export type AuthMode = 'public' | 'session' | 'platform' | 'api_token';
+/**
+ * Modos de autenticação:
+ * - `session`: usuário de empresa; `platform`: operador da plataforma;
+ * - `any_session`: qualquer sessão (empresa ou plataforma), para rotas da própria conta;
+ * - `api_token`: integração com token de API.
+ */
+export type AuthMode = 'public' | 'session' | 'platform' | 'any_session' | 'api_token';
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export interface FileResponse {
@@ -49,7 +55,7 @@ export interface RouteContext<P, Q, B> {
   /** Transação com o contexto da empresa (ou da plataforma) já definido. */
   db: Db;
   auth: AuthContext;
-  /** Empresa do contexto. Lança erro em rotas de plataforma. */
+  /** Empresa do contexto. Lança erro em rotas de plataforma ou quando o usuário é da plataforma. */
   tenantId: string;
   params: P;
   query: Q;
@@ -92,7 +98,7 @@ export interface PublicRoute<P, Q, B> extends RouteBase<P, Q, B> {
 }
 
 export interface ProtectedRoute<P, Q, B> extends RouteBase<P, Q, B> {
-  auth: 'session' | 'platform' | 'api_token';
+  auth: Exclude<AuthMode, 'public'>;
   /** Permissão exigida do papel do usuário. Nulo: basta estar autenticado. */
   permission: PermissionKey | null;
   /** Escopo exigido do token de API. */
@@ -168,9 +174,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, routes: read
 
         if (definition.auth === 'platform') {
           if (!auth.isPlatformAdmin) throw forbidden('Rota restrita ao operador da plataforma.');
-        } else if (auth.tenantId === null) {
+        } else if (auth.tenantId === null && definition.auth !== 'any_session') {
           throw forbidden('Esta rota exige um usuário de empresa.');
         }
+        // Sem empresa, a transação roda no contexto da plataforma; com empresa, no da empresa.
+        const platformContext = definition.auth === 'platform' || auth.tenantId === null;
 
         if (auth.kind === 'session') {
           if (definition.method !== 'GET') {
@@ -191,9 +199,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, routes: read
         }
 
         const context = {
-          tenantId: definition.auth === 'platform' ? null : auth.tenantId,
+          tenantId: platformContext ? null : auth.tenantId,
           userId: auth.userId,
-          platform: definition.auth === 'platform',
+          platform: platformContext,
         };
 
         const result = await withContext(deps.pool, context, async (db) => {
@@ -208,7 +216,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, routes: read
             return settingsCache;
           };
 
-          if (definition.auth !== 'platform') {
+          if (!platformContext) {
             const isWrite = definition.write ?? definition.method !== 'GET';
             if (isWrite || definition.module) {
               const current = await entitlements();
