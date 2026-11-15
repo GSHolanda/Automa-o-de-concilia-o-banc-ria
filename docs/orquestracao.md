@@ -36,7 +36,10 @@ Modelo e esforço são os informados pelo ambiente. Custo só aparece quando há
 | 4 (base) | base da interface | sonnet (solicitado) | medium | Componentes, autenticação, navegação por permissão | build do web passa | não |
 | 3 (E5) | acesso e sessões | opus (solicitado) | high | Login, sessões, usuários, papéis, auditoria, plataforma, CLI | API 53 testes passando; typecheck limpo | não |
 
+| 3 (E6) | configuração por empresa | sonnet (solicitado) | medium | Configurações, cadastros, módulos, licença, onboarding | 30 testes novos; integrado | não |
+| 3 (E7) | fila e importação | opus (solicitado) | high | Fila com repetição e idempotência; importação OFX/CSV/XLSX | 24 testes novos; API total 107 passando | não |
+| 4 (telas) | acesso, auditoria, plataforma, configurações, implantação | sonnet (solicitado) | medium | 3 tarefas de telas | build do web passa; sem teste contra a API ainda | não |
 Modelo "solicitado": o ambiente aceitou o parâmetro na delegação, mas não informa o modelo que atendeu.
-Consumo informado pelo ambiente por subagente: operação 88 mil tokens; base web 120 mil; E5 208 mil.
+Consumo informado pelo ambiente por subagente: operação 88 mil tokens; base web 120 mil; E5 208 mil; E6 151 mil; E7 266 mil; telas 120 + 129 + 145 mil.
 
 Custo real da sessão do orquestrador até este ponto, informado pelo ambiente: US$ 16,60.

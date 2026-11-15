@@ -208,3 +208,18 @@ Importação (`src/modules/imports/`):
   Sem integração verificada → 409 `integration_not_configured`.
 - Testes: CA-23, CA-27, webhook contra servidor HTTP local de teste (identificado como tal) com conferência da
   assinatura, idempotência e revogação da API de entrada, `safeFetch` recusando endereço privado.
+
+## Referência do que já existe (use, não reescreva)
+- Fila (`apps/api/src/jobs/`): `enqueue(db,{tenantId,type,payload,idempotencyKey,maxAttempts?,createdBy?}) → {job,created}`;
+  `registerJobHandler(type, handler)` em `jobs/handlers.ts`, com
+  `JobHandler = { run({db,job,tenantId,deps,audit}), onDead?(db,job,error), onRetry?(db,job) }`;
+  `runPendingJobs(deps) → {processed,succeeded,retried,dead}`; `app.deps` dá acesso às dependências nos testes.
+- Paginação por cursor: `src/http/cursor.ts`. CRUD genérico: `src/modules/registry/crud.ts`.
+- Utilitários de teste (`test/helpers/imports.ts`): `createBankAccount(tenantId, {...}) → {id,name,accountNumber}`,
+  `createImportProfile(tenantId, {name?,sourceKind,fileFormat,config})`, `buildOfx({accountId, transactions:[{date,amount,memo,
+  type?,fitId?,name?,checkNum?}]})`, `buildCsv(rows,{delimiter?,encoding?})`, `buildXlsx(rows)`,
+  `uploadImport(client,{sourceKind,bankAccountId?,profileId?,fileName,content})`,
+  `importFile(app, client, upload, confirmBody?) → {batchId,jobId}`, `drainJobs(app)`, `bankTransactionsOf(batchId)`,
+  `ledgerEntriesOf(batchId)`.
+- Possível duplicidade na importação já gera `matches` `ignored`/`suggested` com `divergence='duplicate'`.
+- E6 pronta: `/settings`, `/company`, cadastros, `/modules`, `/license`, `/onboarding`.
