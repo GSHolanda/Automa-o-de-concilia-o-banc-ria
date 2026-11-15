@@ -4,7 +4,20 @@ import { routes as audit } from './modules/audit/routes';
 import { routes as auth } from './modules/auth/routes';
 import { routes as imports } from './modules/imports/routes';
 import { routes as jobs } from './modules/jobs/routes';
+import { routes as onboarding } from './modules/onboarding/routes';
 import { routes as platform } from './modules/platform/routes';
+import { routes as registry } from './modules/registry/definitions';
+import { routes as settings } from './modules/settings/routes';
 
-/** Lista central das rotas da API. Cada módulo novo entra aqui. */
-export const routes: readonly RouteDefinition[] = [...auth, ...access, ...audit, ...platform, ...jobs, ...imports];
+/** Lista central das rotas da API. Cada módulo novo entra aqui, uma linha por módulo. */
+export const routes: readonly RouteDefinition[] = [
+  ...auth,
+  ...access,
+  ...audit,
+  ...platform,
+  ...settings,
+  ...registry,
+  ...onboarding,
+  ...jobs,
+  ...imports,
+];
