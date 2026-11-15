@@ -21,3 +21,10 @@ export interface AppDeps {
     error: (object: Record<string, unknown>, message: string) => void;
   };
 }
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /** Dependências da aplicação; usadas pelo trabalhador e pelos testes (ex.: runPendingJobs). */
+    deps: AppDeps;
+  }
+}

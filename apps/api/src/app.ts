@@ -18,6 +18,7 @@ import { AppError, fromDatabaseError } from './http/errors';
 import { API_PREFIX, buildOpenApi, registerRoutes } from './http/route';
 import { createMetrics } from './observability/metrics';
 import { routes } from './routes';
+import { startWorker, type WorkerHandle } from './jobs/worker';
 import { hashPassword } from './security/password';
 import { safeEqual } from './security/tokens';
 
@@ -82,7 +83,10 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
   });
 
   const pool = createPool(config.databaseUrl, config.dbPoolMax);
+  let worker: WorkerHandle | null = null;
   app.addHook('onClose', async () => {
+    // O trabalhador termina o que está em andamento antes de o pool ser fechado.
+    await worker?.stop();
     await pool.end();
   });
 
@@ -108,6 +112,13 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
       error: (object, message) => app.log.error(object, message),
     },
   };
+
+  app.decorate('deps', deps);
+  if (config.workerEnabled) {
+    app.addHook('onReady', async () => {
+      worker = startWorker(deps);
+    });
+  }
 
   await app.register(cookie);
   await app.register(helmet, {
