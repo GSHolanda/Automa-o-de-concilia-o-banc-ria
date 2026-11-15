@@ -70,3 +70,7 @@ Uma tela nova entra trocando o `element` da rota (hoje `stub(...)`), uma linha p
   (invalida listas, avisa sucesso e erro), `FormModal` (formulário em modal com erro da API e bloqueio no envio),
   `SecretModal` (credencial exibida uma única vez, com copiar). Telas de configuração entram no mapa
   `SETTINGS_ELEMENTS` de `src/routes.tsx`, uma linha cada.
+- `RegistryPage<T>` (`src/features/cadastros/RegistryPage.tsx`): página genérica de cadastro. Propriedades: `path`,
+  `query?`, `fixed?`, `title`, `subtitle?`, `noun`, `gender?`, `columns`, `fields[{key,label,type,required,nullable,
+  options,defaultValue,createOnly,visibleWhen,hint,...}]`, `hasActive?`, `embedded?`, `intro?`, `canWrite?`.
+  Rótulos de enumerados em `src/features/cadastros/rotulos.ts`.

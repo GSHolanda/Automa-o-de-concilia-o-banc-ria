@@ -4,6 +4,15 @@ import { AuditoriaPage } from './features/auditoria/AuditoriaPage';
 import { PapeisPage } from './features/papeis/PapeisPage';
 import { EmpresasPage } from './features/plataforma/EmpresasPage';
 import { UsuariosPage } from './features/usuarios/UsuariosPage';
+import { CategoriasPage } from './features/cadastros/CategoriasPage';
+import { ClassificacaoPage } from './features/cadastros/ClassificacaoPage';
+import { ContasBancariasPage } from './features/cadastros/ContasBancariasPage';
+import { EstruturaPage } from './features/cadastros/EstruturaPage';
+import { ModelosRelatorioPage } from './features/cadastros/ModelosRelatorioPage';
+import { PlanoDeContasPage } from './features/cadastros/PlanoDeContasPage';
+import { EmpresaPage } from './features/configuracoes/EmpresaPage';
+import { IdentidadePage } from './features/configuracoes/IdentidadePage';
+import { ModulosPage } from './features/configuracoes/ModulosPage';
 import { EmConstrucao } from './pages/EmConstrucao';
 
 export interface AppRoute {
@@ -63,6 +72,15 @@ const SETTINGS_DEFS: SettingsDef[] = [
 const SETTINGS_ELEMENTS: Record<string, ReactNode> = {
   usuarios: <UsuariosPage />,
   papeis: <PapeisPage />,
+  empresa: <EmpresaPage />,
+  'identidade-visual': <IdentidadePage />,
+  estrutura: <EstruturaPage />,
+  'plano-de-contas': <PlanoDeContasPage />,
+  categorias: <CategoriasPage />,
+  'contas-bancarias': <ContasBancariasPage />,
+  classificacao: <ClassificacaoPage />,
+  'modelos-relatorio': <ModelosRelatorioPage />,
+  modulos: <ModulosPage />,
 };
 
 export const SETTINGS_ROUTES: AppRoute[] = SETTINGS_DEFS.map((r) => ({
