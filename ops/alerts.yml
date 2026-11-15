@@ -1,0 +1,60 @@
+# Regras de alerta Prometheus de exemplo para o Concilia.
+# Métricas vêm de apps/api/src/observability/metrics.ts. Ajuste limiares ao seu volume.
+groups:
+  - name: concilia-fila
+    rules:
+      - alert: ConciliaTrabalhoMorto
+        expr: concilia_jobs_in_queue{status="dead"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Há trabalhos mortos na fila do Concilia"
+          description: "{{ $value }} trabalho(s) esgotaram as tentativas. Verifique a causa antes de reenfileirar."
+
+      - alert: ConciliaTrabalhoAguardandoMuitoTempo
+        expr: concilia_jobs_oldest_queued_seconds > 600
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Trabalho aguardando há mais de 10 minutos"
+          description: "O trabalho mais antigo está na fila há {{ $value | humanizeDuration }}. Verifique o worker."
+
+  - name: concilia-http
+    rules:
+      - alert: ConciliaErrosHttp5xxAlto
+        expr: |
+          sum(rate(concilia_http_request_duration_seconds_count{status=~"5.."}[5m]))
+            /
+          sum(rate(concilia_http_request_duration_seconds_count[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Taxa de erros HTTP 5xx acima de 5%"
+          description: "Mais de 5% das requisições falharam com 5xx nos últimos 5 minutos."
+
+      - alert: ConciliaLatenciaP95Alta
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(concilia_http_request_duration_seconds_bucket[5m]))
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Latência p95 acima de 2 s"
+          description: "O p95 das requisições está em {{ $value | humanizeDuration }} há 10 minutos."
+
+  - name: concilia-seguranca
+    rules:
+      - alert: ConciliaPicoDeFalhasDeLogin
+        # Ajuste o valor de "result" aos rótulos gravados pelo módulo de autenticação.
+        expr: sum(increase(concilia_login_attempts_total{result!="success"}[10m])) > 50
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pico de falhas de login"
+          description: "Mais de 50 tentativas de login falharam nos últimos 10 minutos. Possível ataque de senha."

@@ -1,0 +1,44 @@
+:root {
+  --cor-primaria: #0b5cab;
+  --cor-primaria-hover: #094a8a;
+  --cor-primaria-suave: #e7f0f9;
+  --cor-primaria-borda: #9dc1e4;
+  --cor-sobre-primaria: #ffffff;
+
+  --cor-fundo: #f5f6f8;
+  --cor-superficie: #ffffff;
+  --cor-borda: #d9dde3;
+  --cor-borda-forte: #b8bfc9;
+  --cor-texto: #1f2937;
+  --cor-texto-suave: #5b6472;
+  --cor-desabilitado: #9aa3af;
+
+  --cor-sucesso: #15803d;
+  --cor-sucesso-fundo: #e3f4e8;
+  --cor-alerta: #92580a;
+  --cor-alerta-fundo: #fdf1d8;
+  --cor-perigo: #b42318;
+  --cor-perigo-fundo: #fde8e6;
+  --cor-neutro: #4b5563;
+  --cor-neutro-fundo: #eceef1;
+  --cor-info: #1d4ed8;
+  --cor-info-fundo: #e5edfd;
+
+  --e1: 4px;
+  --e2: 8px;
+  --e3: 12px;
+  --e4: 16px;
+  --e5: 20px;
+  --e6: 24px;
+  --e8: 32px;
+  --e10: 40px;
+
+  --raio: 6px;
+  --alvo: 40px;
+  --sombra: 0 1px 2px rgb(16 24 40 / 8%), 0 1px 3px rgb(16 24 40 / 10%);
+  --sombra-alta: 0 12px 32px rgb(16 24 40 / 22%);
+  --fonte: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --fonte-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --menu-largura: 248px;
+  --barra-altura: 56px;
+}
