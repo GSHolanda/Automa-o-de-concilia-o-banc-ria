@@ -10,3 +10,6 @@ test-results/
 playwright-report/
 backups/
 *.tsbuildinfo
+
+# cópias isoladas usadas por subagentes
+.claude/worktrees/
