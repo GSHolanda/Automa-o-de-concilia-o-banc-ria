@@ -1,5 +1,9 @@
 import type { ModuleKey, PermissionKey } from '@concilia/core/shared';
 import type { ReactNode } from 'react';
+import { AuditoriaPage } from './features/auditoria/AuditoriaPage';
+import { PapeisPage } from './features/papeis/PapeisPage';
+import { EmpresasPage } from './features/plataforma/EmpresasPage';
+import { UsuariosPage } from './features/usuarios/UsuariosPage';
 import { EmConstrucao } from './pages/EmConstrucao';
 
 export interface AppRoute {
@@ -27,9 +31,9 @@ export const APP_ROUTES: AppRoute[] = [
   { path: '/conciliacao', title: 'Conciliação', element: stub('Conciliação'), permission: 'reconciliation.view', menu: true },
   { path: '/aprovacoes', title: 'Aprovações', element: stub('Aprovações'), permission: 'reconciliation.approve', module: 'approvals', menu: true },
   { path: '/relatorios', title: 'Relatórios', element: stub('Relatórios'), permission: 'exports.create', menu: true },
-  { path: '/auditoria', title: 'Auditoria', element: stub('Auditoria'), permission: 'audit.view', menu: true },
+  { path: '/auditoria', title: 'Auditoria', element: <AuditoriaPage />, permission: 'audit.view', menu: true },
   { path: '/implantacao', title: 'Implantação', element: stub('Implantação'), permission: 'settings.manage', menu: true },
-  { path: '/plataforma/empresas', title: 'Empresas', element: stub('Empresas'), platform: true, menu: true },
+  { path: '/plataforma/empresas', title: 'Empresas', element: <EmpresasPage />, platform: true, menu: true },
 ];
 
 /** Telas de /configuracoes/... */
@@ -55,9 +59,15 @@ const SETTINGS_DEFS: SettingsDef[] = [
   { path: 'licenca', title: 'Licença' },
 ];
 
+/** Telas prontas de /configuracoes (chave = `path` de SETTINGS_DEFS). */
+const SETTINGS_ELEMENTS: Record<string, ReactNode> = {
+  usuarios: <UsuariosPage />,
+  papeis: <PapeisPage />,
+};
+
 export const SETTINGS_ROUTES: AppRoute[] = SETTINGS_DEFS.map((r) => ({
   permission: 'settings.view' as PermissionKey,
   ...r,
   path: `/configuracoes/${r.path}`,
-  element: stub(r.title),
+  element: SETTINGS_ELEMENTS[r.path] ?? stub(r.title),
 }));

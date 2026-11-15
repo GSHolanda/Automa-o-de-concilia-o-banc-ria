@@ -66,3 +66,7 @@ Uma tela nova entra trocando o `element` da rota (hoje `stub(...)`), uma linha p
   onChange, label`. `Pagination` (cursor): `hasPrev, hasNext, onPrev, onNext, summary, loading`.
 - `StatusBadge`: `status`, `label?`. `Money`: `cents`. `DateText`: `value, withTime?`. `FileDrop`: `onFiles, accept,
   multiple, maxSizeMb, onReject`. `PageHeader`, `EmptyState`, `Spinner`, `Badge`.
+- `src/features/shared` (para telas de cadastro): `useWrite({mutationFn, invalidate, success?, inlineError?, onSuccess?})`
+  (invalida listas, avisa sucesso e erro), `FormModal` (formulário em modal com erro da API e bloqueio no envio),
+  `SecretModal` (credencial exibida uma única vez, com copiar). Telas de configuração entram no mapa
+  `SETTINGS_ELEMENTS` de `src/routes.tsx`, uma linha cada.
