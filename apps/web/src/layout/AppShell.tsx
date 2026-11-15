@@ -29,7 +29,7 @@ function useMenu(): MenuEntry[] {
 }
 
 export function AppShell() {
-  const { me, logout, readOnly } = useAuth();
+  const { me, logout, readOnly, can } = useAuth();
   const menu = useMenu();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -130,6 +130,11 @@ export function AppShell() {
           <div className="faixa-aviso" role="status">
             Licença em somente leitura
             {me.license?.readOnlyReason ? `: ${me.license.readOnlyReason}` : ''}. Alterações estão desabilitadas.
+          </div>
+        )}
+        {me.tenant?.status === 'onboarding' && can('settings.manage') && !me.isPlatformAdmin && (
+          <div className="faixa-aviso" role="status">
+            A implantação da empresa ainda não foi concluída. <Link to="/implantacao">Continuar a implantação</Link>
           </div>
         )}
         <main className="conteudo" id="conteudo">

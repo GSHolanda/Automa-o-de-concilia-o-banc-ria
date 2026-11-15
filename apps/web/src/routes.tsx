@@ -1,5 +1,10 @@
 import type { ModuleKey, PermissionKey } from '@concilia/core/shared';
 import type { ReactNode } from 'react';
+import { RegrasPage } from './features/configuracoes/RegrasPage';
+import { AprovacoesPage } from './features/configuracoes/AprovacoesPage';
+import { SegurancaPage } from './features/configuracoes/SegurancaPage';
+import { PerfisImportacaoPage } from './features/perfis-importacao/PerfisImportacaoPage';
+import { ImplantacaoPage } from './features/implantacao/ImplantacaoPage';
 import { AuditoriaPage } from './features/auditoria/AuditoriaPage';
 import { PapeisPage } from './features/papeis/PapeisPage';
 import { EmpresasPage } from './features/plataforma/EmpresasPage';
@@ -41,7 +46,7 @@ export const APP_ROUTES: AppRoute[] = [
   { path: '/aprovacoes', title: 'Aprovações', element: stub('Aprovações'), permission: 'reconciliation.approve', module: 'approvals', menu: true },
   { path: '/relatorios', title: 'Relatórios', element: stub('Relatórios'), permission: 'exports.create', menu: true },
   { path: '/auditoria', title: 'Auditoria', element: <AuditoriaPage />, permission: 'audit.view', menu: true },
-  { path: '/implantacao', title: 'Implantação', element: stub('Implantação'), permission: 'settings.manage', menu: true },
+  { path: '/implantacao', title: 'Implantação', element: <ImplantacaoPage />, permission: 'settings.manage', menu: true },
   { path: '/plataforma/empresas', title: 'Empresas', element: <EmpresasPage />, platform: true, menu: true },
 ];
 
@@ -58,6 +63,7 @@ const SETTINGS_DEFS: SettingsDef[] = [
   { path: 'aprovacoes', title: 'Aprovações', module: 'approvals' },
   { path: 'classificacao', title: 'Classificação' },
   { path: 'perfis-importacao', title: 'Perfis de importação' },
+  { path: 'seguranca', title: 'Segurança' },
   { path: 'usuarios', title: 'Usuários', permission: 'users.manage' },
   { path: 'papeis', title: 'Papéis', permission: 'users.manage' },
   { path: 'integracoes', title: 'Integrações', permission: 'integrations.manage' },
@@ -70,6 +76,10 @@ const SETTINGS_DEFS: SettingsDef[] = [
 
 /** Telas prontas de /configuracoes (chave = `path` de SETTINGS_DEFS). */
 const SETTINGS_ELEMENTS: Record<string, ReactNode> = {
+  regras: <RegrasPage />,
+  aprovacoes: <AprovacoesPage />,
+  seguranca: <SegurancaPage />,
+  'perfis-importacao': <PerfisImportacaoPage />,
   usuarios: <UsuariosPage />,
   papeis: <PapeisPage />,
   empresa: <EmpresaPage />,

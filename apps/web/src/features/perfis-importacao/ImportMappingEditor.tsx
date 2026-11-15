@@ -218,7 +218,7 @@ export function ImportMappingEditor({ value, onChange, headers, fileFormat, erro
               {columnPicker('credit', 'Crédito (entrada)', true)}
             </>
           ) : (
-            {columnPicker('amount', 'Valor', true)}
+            columnPicker('amount', 'Valor', true)
           )}
           {value.amountMode === 'type_column' && columnPicker('typeColumn', 'Tipo (entrada/saída)', true)}
         </div>

@@ -74,3 +74,6 @@ Uma tela nova entra trocando o `element` da rota (hoje `stub(...)`), uma linha p
   `query?`, `fixed?`, `title`, `subtitle?`, `noun`, `gender?`, `columns`, `fields[{key,label,type,required,nullable,
   options,defaultValue,createOnly,visibleWhen,hint,...}]`, `hasActive?`, `embedded?`, `intro?`, `canWrite?`.
   Rótulos de enumerados em `src/features/cadastros/rotulos.ts`.
+- `ImportMappingEditor` (`src/features/perfis-importacao/ImportMappingEditor.tsx`): `value`, `onChange`, `headers?`,
+  `fileFormat?`, `errors?`, `disabled?`; exporta `defaultImportMapping()`, `validateImportMapping(config)` e
+  `cleanImportMapping(config)`. Configurações: utilitários em `src/features/configuracoes/settings.tsx`.
