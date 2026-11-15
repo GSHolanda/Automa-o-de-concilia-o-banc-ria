@@ -38,14 +38,17 @@ CREATE FUNCTION auth_find_session(p_token_hash bytea)
 RETURNS TABLE (
   session_id uuid, user_id uuid, tenant_id uuid, created_at timestamptz, last_seen_at timestamptz,
   expires_at timestamptz, revoked_at timestamptz, user_status text, role_id uuid,
-  is_platform_admin boolean, must_change_password boolean, name text, email text, tenant_status text
+  is_platform_admin boolean, must_change_password boolean, name text, email text, tenant_status text,
+  role_key text, role_name text, permissions text[], idle_minutes integer
 )
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
   SELECT s.id, s.user_id, u.tenant_id, s.created_at, s.last_seen_at, s.expires_at, s.revoked_at,
-         u.status, u.role_id, u.is_platform_admin, u.must_change_password, u.name, u.email, t.status
+         u.status, u.role_id, u.is_platform_admin, u.must_change_password, u.name, u.email, t.status,
+         r.key, r.name, coalesce(r.permissions, '{}'), s.idle_minutes
     FROM sessions s
     JOIN users u ON u.id = s.user_id
     LEFT JOIN tenants t ON t.id = u.tenant_id
+    LEFT JOIN roles r ON r.id = u.role_id AND r.tenant_id = u.tenant_id
    WHERE s.token_hash = p_token_hash
 $$;
 

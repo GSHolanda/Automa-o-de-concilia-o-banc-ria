@@ -58,6 +58,8 @@ export async function migrate(options: MigrateOptions): Promise<MigrateResult> {
         `O papel da aplicação "${options.appRole}" não existe. Execute ops/db-bootstrap.sh antes das migrações.`,
       );
     }
+    // A aplicação lê a versão do esquema na verificação de prontidão.
+    await client.query(`GRANT SELECT ON schema_migrations TO ${pg.escapeIdentifier(options.appRole)}`);
 
     const done = await client.query<{ name: string; checksum: string }>(
       'SELECT name, checksum FROM schema_migrations',

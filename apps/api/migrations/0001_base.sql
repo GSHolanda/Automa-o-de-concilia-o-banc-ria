@@ -209,6 +209,8 @@ CREATE TABLE sessions (
   created_at      timestamptz NOT NULL DEFAULT now(),
   last_seen_at    timestamptz NOT NULL DEFAULT now(),
   expires_at      timestamptz NOT NULL,
+  -- Limite de inatividade vigente quando a sessão foi criada (configuração da empresa).
+  idle_minutes    integer NOT NULL DEFAULT 60 CHECK (idle_minutes BETWEEN 5 AND 1440),
   revoked_at      timestamptz,
   revoked_reason  text,
   ip              text,

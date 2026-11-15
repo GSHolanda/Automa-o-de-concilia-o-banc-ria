@@ -11,3 +11,6 @@ export * from './parsers/tabular';
 export * from './matching/rules';
 export * from './matching/types';
 export * from './matching/engine';
+export * from './permissions';
+export * from './modules';
+export * from './settings/schema';
