@@ -1,7 +1,7 @@
 import { integrationConfigSchemas, INTEGRATION_MODULES, sha256Hex } from '@concilia/core';
-import { withContext } from '../../db/context';
+import type { Db } from '../../db/context';
 import { enqueue } from '../../jobs/queue';
-import type { JobContext, JobHandler } from '../../jobs/types';
+import type { JobContext, JobHandler, StepsJobContext } from '../../jobs/types';
 import { createRestLedgerConnector } from '../../integrations/rest-ledger';
 import { scrubSecret } from '../../security/secrets';
 import { IMPORT_JOB_TYPE } from '../imports/queries';
@@ -74,24 +74,33 @@ export async function createJsonBatch(
   return { batchId, jobId: job.id, created: true };
 }
 
-async function pull(context: JobContext): Promise<unknown> {
-  const { db, job, tenantId, deps } = context;
-  const integrationId = typeof job.payload.integrationId === 'string' ? job.payload.integrationId : null;
-  const dateFrom = String(job.payload.dateFrom ?? '');
-  const dateTo = String(job.payload.dateTo ?? '');
-  if (!integrationId) throw new Error('Trabalho de conector sem integração');
+/** Integração lida na primeira etapa, ou o motivo para pular o trabalho. */
+async function loadPullTarget(db: Db, tenantId: string, integrationId: string): Promise<IntegrationRow | { skipped: string }> {
   const found = await db.query<IntegrationRow>('SELECT * FROM integrations WHERE tenant_id = $1 AND id = $2', [
     tenantId,
     integrationId,
   ]);
   const integration = found.rows[0];
   if (!integration || integration.kind !== 'rest_ledger' || !integration.active) {
-    return { skipped: true, reason: 'Integração inexistente ou inativa.' };
+    return { skipped: 'Integração inexistente ou inativa.' };
   }
   const entitlements = await loadEntitlements(db, tenantId);
   if (!entitlements.modules.includes(INTEGRATION_MODULES.rest_ledger)) {
-    return { skipped: true, reason: 'Módulo do conector REST desabilitado.' };
+    return { skipped: 'Módulo do conector REST desabilitado.' };
   }
+  return integration;
+}
+
+/** Em etapas: lê a integração, chama a API externa sem transação aberta e grava o lote em transação curta. */
+async function pull(context: StepsJobContext): Promise<unknown> {
+  const { job, tenantId, deps, transaction } = context;
+  const integrationId = typeof job.payload.integrationId === 'string' ? job.payload.integrationId : null;
+  const dateFrom = String(job.payload.dateFrom ?? '');
+  const dateTo = String(job.payload.dateTo ?? '');
+  if (!integrationId) throw new Error('Trabalho de conector sem integração');
+  const target = await transaction(({ db }) => loadPullTarget(db, tenantId, integrationId));
+  if ('skipped' in target) return { skipped: true, reason: target.skipped };
+  const integration = target;
 
   const config = integrationConfigSchemas.rest_ledger.parse(integration.config);
   let secret: string | null = null;
@@ -104,42 +113,47 @@ async function pull(context: JobContext): Promise<unknown> {
     });
   } catch (error) {
     const message = scrubSecret(error instanceof Error ? error.message : 'Falha no conector.', secret).slice(0, ERROR_LIMIT);
-    // Chamada real falhou: a integração fica com erro (em transação própria, pois esta será desfeita).
-    await withContext(deps.pool, { tenantId }, (own) => recordCheck(own, integration, message));
+    // Chamada real falhou: a integração fica com erro (se não mudou durante a chamada).
+    await transaction(({ db }) => recordCheck(db, integration, message));
     throw new Error(message);
   }
 
-  const accountOk = config.bankAccountId
-    ? (
-        await db.query('SELECT 1 FROM bank_accounts WHERE tenant_id = $1 AND id = $2 AND active', [
-          tenantId,
-          config.bankAccountId,
-        ])
-      ).rows.length > 0
-    : false;
-  const entries = result.items.map((item, index) => ({ ...item, raw: result.raw[index] ?? null }));
-  const content = Buffer.from(
-    JSON.stringify({ version: 1, source: 'connector', integrationId, dateFrom, dateTo, entries }),
-    'utf8',
-  );
-  const batch = await createJsonBatch(context, {
-    origin: 'connector',
-    fileName: `conector-${dateFrom}-${dateTo}.json`,
-    content,
-    bankAccountId: accountOk ? config.bankAccountId : null,
-    createdBy: job.created_by,
-    integrationId,
+  return transaction(async ({ db, audit }) => {
+    const accountOk = config.bankAccountId
+      ? (
+          await db.query('SELECT 1 FROM bank_accounts WHERE tenant_id = $1 AND id = $2 AND active', [
+            tenantId,
+            config.bankAccountId,
+          ])
+        ).rows.length > 0
+      : false;
+    const entries = result.items.map((item, index) => ({ ...item, raw: result.raw[index] ?? null }));
+    const content = Buffer.from(
+      JSON.stringify({ version: 1, source: 'connector', integrationId, dateFrom, dateTo, entries }),
+      'utf8',
+    );
+    const batch = await createJsonBatch(
+      { db, tenantId },
+      {
+        origin: 'connector',
+        fileName: `conector-${dateFrom}-${dateTo}.json`,
+        content,
+        bankAccountId: accountOk ? config.bankAccountId : null,
+        createdBy: job.created_by,
+        integrationId,
+      },
+    );
+    await recordCheck(db, integration, null);
+    await audit({
+      action: 'connector.pulled',
+      entityType: 'import_batch',
+      entityId: batch.batchId,
+      summary: `Conector ${integration.name}: ${entries.length} lançamento(s) de ${dateFrom} a ${dateTo}`,
+      after: { batchId: batch.batchId, created: batch.created, items: entries.length },
+      metadata: { integrationId, jobId: job.id },
+    });
+    return { batchId: batch.batchId, importJobId: batch.jobId, items: entries.length, duplicate: !batch.created };
   });
-  await recordCheck(db, integration, null);
-  await context.audit({
-    action: 'connector.pulled',
-    entityType: 'import_batch',
-    entityId: batch.batchId,
-    summary: `Conector ${integration.name}: ${entries.length} lançamento(s) de ${dateFrom} a ${dateTo}`,
-    after: { batchId: batch.batchId, created: batch.created, items: entries.length },
-    metadata: { integrationId, jobId: job.id },
-  });
-  return { batchId: batch.batchId, importJobId: batch.jobId, items: entries.length, duplicate: !batch.created };
 }
 
-export const connectorPullHandler: JobHandler = { run: pull };
+export const connectorPullHandler: JobHandler = { transaction: 'steps', run: pull };

@@ -78,7 +78,11 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
       },
     },
     genReqId: () => randomUUID(),
-    trustProxy: config.trustProxy,
+    // Número de saltos vira função (mesma regra do Fastify: confia nos `n` saltos mais próximos).
+    trustProxy:
+      typeof config.trustProxy === 'number'
+        ? ((hops: number) => (_address: string, hop: number) => hop < hops)(config.trustProxy)
+        : config.trustProxy,
     bodyLimit: 2 * 1024 * 1024,
   });
 

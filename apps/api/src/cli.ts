@@ -29,6 +29,7 @@ Comandos:
   secrets:rotate
       Recifra todos os segredos de integração com a chave nova, em uma transação, com MIGRATION_DATABASE_URL.
       Chave atual: SECRETS_MASTER_KEY. Nova: NEW_SECRETS_MASTER_KEY e NEW_SECRETS_KEY_VERSION (1 a 255).
+      Anterior (opcional): SECRETS_PREVIOUS_MASTER_KEY e SECRETS_PREVIOUS_KEY_VERSION.
       Segredos já na versão nova são pulados. Depois, troque SECRETS_MASTER_KEY e SECRETS_KEY_VERSION e reinicie.
   tenant:export --tenant <slug> --out <arquivo> [--include-files]
       Exporta em NDJSON todos os dados da empresa (sem hashes de senha, segredos nem tokens), com
@@ -78,14 +79,31 @@ async function secretsRotate(): Promise<void> {
   if (!process.env.NEW_SECRETS_KEY_VERSION || !Number.isInteger(version)) {
     throw new CliError('Defina NEW_SECRETS_KEY_VERSION (inteiro de 1 a 255) para a chave nova.');
   }
+  const previousVersion = Number(process.env.SECRETS_PREVIOUS_KEY_VERSION);
+  if (process.env.SECRETS_PREVIOUS_MASTER_KEY && !Number.isInteger(previousVersion)) {
+    throw new CliError('Com SECRETS_PREVIOUS_MASTER_KEY, defina SECRETS_PREVIOUS_KEY_VERSION (inteiro de 1 a 255).');
+  }
   await rotateSecrets({
     connectionString: ownerUrl(),
     currentKey: parseMasterKey(process.env.SECRETS_MASTER_KEY, 'SECRETS_MASTER_KEY'),
     newKey: parseMasterKey(process.env.NEW_SECRETS_MASTER_KEY, 'NEW_SECRETS_MASTER_KEY'),
     newVersion: version,
+    // Segredos gravados com a chave anterior (API ainda com ela durante a troca passada).
+    previousKeys: process.env.SECRETS_PREVIOUS_MASTER_KEY
+      ? [
+          {
+            version: previousVersion,
+            key: parseMasterKey(process.env.SECRETS_PREVIOUS_MASTER_KEY, 'SECRETS_PREVIOUS_MASTER_KEY'),
+          },
+        ]
+      : [],
     log: (line) => console.log(line),
   });
-  console.log(`Agora defina SECRETS_MASTER_KEY com a chave nova e SECRETS_KEY_VERSION=${version}, e reinicie a API e o trabalhador.`);
+  console.log(
+    `Agora defina SECRETS_MASTER_KEY com a chave nova e SECRETS_KEY_VERSION=${version}, a chave anterior em ` +
+      'SECRETS_PREVIOUS_MASTER_KEY e SECRETS_PREVIOUS_KEY_VERSION, e reinicie a API e o trabalhador. Depois rode ' +
+      'secrets:rotate de novo (nova = atual) para recifrar o que foi gravado na janela e retire SECRETS_PREVIOUS_*.',
+  );
 }
 
 async function tenantExport(options: Options): Promise<void> {

@@ -30,7 +30,11 @@ interface PgError {
   code?: string;
   constraint?: string;
   message?: string;
+  hint?: string;
 }
+
+/** Recusas das proteções do banco com mensagem própria em português (gatilhos com HINT). */
+const GUARD_CODES = new Set(['self_access', 'four_eyes']);
 
 /** Converte violações de restrição do banco em erros compreensíveis, sem expor detalhes internos. */
 export function fromDatabaseError(error: unknown): AppError | null {
@@ -49,6 +53,7 @@ export function fromDatabaseError(error: unknown): AppError | null {
     case '22001':
       return badRequest('Dados inválidos.', 'invalid_data', { constraint: pgError.constraint });
     case '42501':
+      if (pgError.hint && GUARD_CODES.has(pgError.hint) && pgError.message) return forbidden(pgError.message, pgError.hint);
       return forbidden('Operação não permitida.', 'not_allowed');
     case '40001':
     case '40P01':

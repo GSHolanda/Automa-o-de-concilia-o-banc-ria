@@ -1,11 +1,12 @@
 import { buildApp } from './app';
-import { ConfigError, loadConfig } from './config/env';
+import { assertServerConfig, ConfigError, loadConfig } from './config/env';
 
 /** Prazo para concluir as requisições em andamento antes de encerrar à força. */
 const SHUTDOWN_TIMEOUT_MS = 15_000;
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  assertServerConfig(config);
   const app = await buildApp(config);
 
   let closing = false;

@@ -64,7 +64,13 @@ for (const [network, prefix] of [
 for (const [network, prefix] of [
   ['::', 128],
   ['::1', 128],
+  // Faixas de transição que embutem IPv4 (achado 12 da revisão de segurança).
+  ['::', 96],
   ['64:ff9b::', 96],
+  ['64:ff9b:1::', 48],
+  ['2001::', 32],
+  ['2002::', 16],
+  ['fec0::', 10],
   ['100::', 64],
   ['2001:db8::', 32],
   ['fc00::', 7],
@@ -86,15 +92,49 @@ function mappedIpv4(address: string): string | null {
   return match ? match[1]! : null;
 }
 
+/** Os oito grupos de 16 bits de um IPv6 (aceita "::" e IPv4 pontuado no fim); nulo se inválido. */
+function ipv6Groups(address: string): number[] | null {
+  if (isIP(address) !== 6) return null;
+  let text = address.toLowerCase();
+  const dotted = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(text);
+  if (dotted) {
+    const [a, b, c, d] = dotted.slice(1).map(Number) as [number, number, number, number];
+    text = `${text.slice(0, dotted.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const [head, tail] = text.split('::') as [string, string | undefined];
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  const fill = tail === undefined ? [] : Array<string>(8 - left.length - right.length).fill('0');
+  const groups = [...left, ...fill, ...right].map((group) => parseInt(group, 16));
+  return groups.length === 8 && groups.every((group) => Number.isInteger(group)) ? groups : null;
+}
+
+function ipv4Of(high: number, low: number): string {
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.');
+}
+
+/** IPv4 embutidos por mapeamento, compatibilidade, NAT64 ou 6to4: conferidos como IPv4. */
+function embeddedIpv4(address: string): string[] {
+  const groups = ipv6Groups(address);
+  if (!groups) return [];
+  const found: string[] = [];
+  const zeros = (count: number) => groups.slice(0, count).every((group) => group === 0);
+  if (zeros(5) && (groups[5] === 0 || groups[5] === 0xffff)) found.push(ipv4Of(groups[6]!, groups[7]!));
+  if (groups[0] === 0x64 && groups[1] === 0xff9b) found.push(ipv4Of(groups[6]!, groups[7]!));
+  if (groups[0] === 0x2002) found.push(ipv4Of(groups[1]!, groups[2]!));
+  return found;
+}
+
 export function isBlockedAddress(address: string, allowPrivate: boolean): boolean {
   const v4 = mappedIpv4(address);
   const ip = v4 ?? address;
   const family = isIP(ip);
   if (family === 0) return true;
   const type = family === 4 ? 'ipv4' : 'ipv6';
-  if (metadata.check(ip, type)) return true;
+  const embedded = family === 6 ? embeddedIpv4(ip) : [];
+  if (metadata.check(ip, type) || embedded.some((item) => metadata.check(item, 'ipv4'))) return true;
   if (allowPrivate) return false;
-  return blocked.check(ip, type);
+  return blocked.check(ip, type) || embedded.some((item) => blocked.check(item, 'ipv4'));
 }
 
 /** Resolve o nome e devolve um endereço permitido. Qualquer endereço proibido na resolução recusa o destino. */

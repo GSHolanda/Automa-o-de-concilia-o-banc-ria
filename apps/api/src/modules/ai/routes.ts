@@ -2,10 +2,11 @@ import {
   aiProviderConfigSchema,
   pairKey,
   type AiCategoryInputV1,
+  type AiCategorySuggestionV1,
   type AiTransactionInputV1,
 } from '@concilia/core';
 import { z } from 'zod';
-import { withContext } from '../../db/context';
+import type { Db } from '../../db/context';
 import { AppError, conflict } from '../../http/errors';
 import { route, type RouteDefinition } from '../../http/route';
 import { AiProviderError, createAnthropicProvider } from '../../integrations/anthropic';
@@ -29,6 +30,33 @@ type ResultItem =
   | { bankTransactionId: string; status: 'no_suggestion'; rationale: string }
   | { bankTransactionId: string; status: 'skipped'; reason: string };
 
+/** Transações pendentes e sem conciliação ativa; as demais saem como ignoradas. */
+async function eligibleTransactions(
+  db: Db,
+  tenantId: string,
+  ids: string[],
+): Promise<{ eligible: TransactionRow[]; results: Map<string, ResultItem> }> {
+  const found = await db.query<TransactionRow>(
+    `SELECT t.id, t.bank_account_id, t.description_norm, t.amount_cents, t.kind, t.recon_status,
+            EXISTS (SELECT 1 FROM match_items i WHERE i.tenant_id = t.tenant_id AND i.bank_transaction_id = t.id AND i.active)
+              AS reserved
+       FROM bank_transactions t
+      WHERE t.tenant_id = $1 AND t.id = ANY ($2::uuid[])`,
+    [tenantId, ids],
+  );
+  const byId = new Map(found.rows.map((row) => [row.id, row]));
+  const results = new Map<string, ResultItem>();
+  const eligible: TransactionRow[] = [];
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (!row) results.set(id, { bankTransactionId: id, status: 'skipped', reason: 'Transação não encontrada.' });
+    else if (row.recon_status !== 'pending' || row.reserved) {
+      results.set(id, { bankTransactionId: id, status: 'skipped', reason: 'A transação não está pendente.' });
+    } else eligible.push(row);
+  }
+  return { eligible, results };
+}
+
 export const routes: RouteDefinition[] = [
   route({
     tags: ['ia'],
@@ -39,61 +67,48 @@ export const routes: RouteDefinition[] = [
     url: '/ai/suggest-categories',
     summary: 'Sugerir categoria por IA para transações pendentes (só sugestão, nunca confirma)',
     body: z.object({ bankTransactionIds: z.array(z.uuid()).min(1).max(MAX_TRANSACTIONS) }),
-    handler: async ({ db, tenantId, body, deps, audit }) => {
-      const integrations = await db.query<IntegrationRow>(
-        `SELECT * FROM integrations
-          WHERE tenant_id = $1 AND kind = 'ai_provider' AND active AND status = 'verified'
-          ORDER BY last_checked_at DESC NULLS LAST, id LIMIT 1`,
-        [tenantId],
-      );
-      const integration = integrations.rows[0];
-      if (!integration) {
-        throw conflict('Nenhuma integração de IA verificada. Cadastre e teste o provedor antes de usar.', 'integration_not_configured');
-      }
+    // A chamada ao provedor (até 60 s) acontece sem transação aberta.
+    transaction: 'steps',
+    handler: async ({ tenantId, body, deps, transaction }) => {
+      const ids = [...new Set(body.bankTransactionIds)];
+      const prepared = await transaction(async ({ db }) => {
+        const integrations = await db.query<IntegrationRow>(
+          `SELECT * FROM integrations
+            WHERE tenant_id = $1 AND kind = 'ai_provider' AND active AND status = 'verified'
+            ORDER BY last_checked_at DESC NULLS LAST, id LIMIT 1`,
+          [tenantId],
+        );
+        const integration = integrations.rows[0];
+        if (!integration) {
+          throw conflict('Nenhuma integração de IA verificada. Cadastre e teste o provedor antes de usar.', 'integration_not_configured');
+        }
+        const { eligible, results } = await eligibleTransactions(db, tenantId, ids);
+        const categories = await db.query<{ id: string; name: string }>(
+          'SELECT id, name FROM categories WHERE tenant_id = $1 AND active ORDER BY name, id',
+          [tenantId],
+        );
+        if (eligible.length > 0 && categories.rows.length === 0) {
+          throw conflict('Cadastre categorias antes de pedir sugestões.', 'no_categories');
+        }
+        return { integration, eligible, results, categories: categories.rows };
+      });
+      const { integration, eligible, results, categories } = prepared;
       const config = aiProviderConfigSchema.parse(integration.config);
 
-      const ids = [...new Set(body.bankTransactionIds)];
-      const found = await db.query<TransactionRow>(
-        `SELECT t.id, t.bank_account_id, t.description_norm, t.amount_cents, t.kind, t.recon_status,
-                EXISTS (SELECT 1 FROM match_items i WHERE i.tenant_id = t.tenant_id AND i.bank_transaction_id = t.id AND i.active)
-                  AS reserved
-           FROM bank_transactions t
-          WHERE t.tenant_id = $1 AND t.id = ANY ($2::uuid[])`,
-        [tenantId, ids],
-      );
-      const byId = new Map(found.rows.map((row) => [row.id, row]));
-      const results = new Map<string, ResultItem>();
-      const eligible: TransactionRow[] = [];
-      for (const id of ids) {
-        const row = byId.get(id);
-        if (!row) results.set(id, { bankTransactionId: id, status: 'skipped', reason: 'Transação não encontrada.' });
-        else if (row.recon_status !== 'pending' || row.reserved) {
-          results.set(id, { bankTransactionId: id, status: 'skipped', reason: 'A transação não está pendente.' });
-        } else eligible.push(row);
-      }
+      // Referências locais à chamada: nenhum identificador interno nem valor sai do sistema.
+      const transactions: AiTransactionInputV1[] = eligible.map((row, index) => ({
+        ref: `t${index + 1}`,
+        descriptionNorm: row.description_norm,
+        direction: Number(row.amount_cents) > 0 ? 'in' : 'out',
+        kind: row.kind,
+      }));
+      const categoryInputs: AiCategoryInputV1[] = categories.map((row, index) => ({ ref: `c${index + 1}`, name: row.name }));
+      const categoryByRef = new Map(categoryInputs.map((item, index) => [item.ref, categories[index]!]));
+      const rowByRef = new Map(transactions.map((item, index) => [item.ref, eligible[index]!]));
 
-      const categories = await db.query<{ id: string; name: string }>(
-        'SELECT id, name FROM categories WHERE tenant_id = $1 AND active ORDER BY name, id',
-        [tenantId],
-      );
-      if (eligible.length > 0 && categories.rows.length === 0) {
-        throw conflict('Cadastre categorias antes de pedir sugestões.', 'no_categories');
-      }
-
+      let suggestions: AiCategorySuggestionV1[] = [];
       if (eligible.length > 0) {
-        // Referências locais à chamada: nenhum identificador interno nem valor sai do sistema.
-        const transactions: AiTransactionInputV1[] = eligible.map((row, index) => ({
-          ref: `t${index + 1}`,
-          descriptionNorm: row.description_norm,
-          direction: Number(row.amount_cents) > 0 ? 'in' : 'out',
-          kind: row.kind,
-        }));
-        const categoryInputs: AiCategoryInputV1[] = categories.rows.map((row, index) => ({ ref: `c${index + 1}`, name: row.name }));
-        const categoryByRef = new Map(categoryInputs.map((item, index) => [item.ref, categories.rows[index]!]));
-        const rowByRef = new Map(transactions.map((item, index) => [item.ref, eligible[index]!]));
-
         let secret: string | null = null;
-        let suggestions;
         try {
           secret = readSecret(deps.config, integration);
           if (!secret) throw new AiProviderError('Chave de API do provedor de IA não configurada.', 'rejected');
@@ -105,8 +120,8 @@ export const routes: RouteDefinition[] = [
             error instanceof AiProviderError ? error : new AiProviderError('Falha ao chamar o provedor de IA.', 'unreachable');
           const message = scrubSecret(failure.message, secret).slice(0, ERROR_LIMIT);
           if (failure.kind !== 'invalid_response') {
-            // Provedor não alcançado ou recusou: deixa de estar verificado (transação própria; esta será desfeita).
-            await withContext(deps.pool, { tenantId }, (own) => recordCheck(own, integration, message));
+            // Provedor não alcançado ou recusou: deixa de estar verificado (se não mudou durante a chamada).
+            await transaction(({ db }) => recordCheck(db, integration, message));
           }
           throw new AppError(
             502,
@@ -114,9 +129,17 @@ export const routes: RouteDefinition[] = [
             `${message} Nenhuma sugestão foi gravada.`,
           );
         }
+      }
 
+      return transaction(async ({ db, audit }) => {
+        // A situação pode ter mudado durante a chamada: só grava para quem continua pendente.
+        const still = new Set((await eligibleTransactions(db, tenantId, eligible.map((row) => row.id))).eligible.map((row) => row.id));
         const suggested = new Map(suggestions.map((item) => [item.transactionRef, item]));
         for (const [ref, row] of rowByRef) {
+          if (!still.has(row.id)) {
+            results.set(row.id, { bankTransactionId: row.id, status: 'skipped', reason: 'A transação não está pendente.' });
+            continue;
+          }
           const suggestion = suggested.get(ref);
           const category = suggestion?.categoryRef ? categoryByRef.get(suggestion.categoryRef) : undefined;
           if (!suggestion || !category) {
@@ -167,19 +190,19 @@ export const routes: RouteDefinition[] = [
             rationale: suggestion.rationale,
           });
         }
-      }
 
-      const items = ids.map((id) => results.get(id)!);
-      const count = (status: ResultItem['status']) => items.filter((item) => item.status === status).length;
-      await audit({
-        action: 'ai.categories_suggested',
-        entityType: 'integration',
-        entityId: integration.id,
-        summary: `Sugestões de categoria por IA: ${count('suggested')} sugerida(s), ${count('no_suggestion')} sem sugestão, ${count('skipped')} ignorada(s)`,
-        after: { suggested: count('suggested'), noSuggestion: count('no_suggestion'), skipped: count('skipped') },
-        metadata: { provider: config.provider, model: config.model, bankTransactionIds: ids },
+        const items = ids.map((id) => results.get(id)!);
+        const count = (status: ResultItem['status']) => items.filter((item) => item.status === status).length;
+        await audit({
+          action: 'ai.categories_suggested',
+          entityType: 'integration',
+          entityId: integration.id,
+          summary: `Sugestões de categoria por IA: ${count('suggested')} sugerida(s), ${count('no_suggestion')} sem sugestão, ${count('skipped')} ignorada(s)`,
+          after: { suggested: count('suggested'), noSuggestion: count('no_suggestion'), skipped: count('skipped') },
+          metadata: { provider: config.provider, model: config.model, bankTransactionIds: ids },
+        });
+        return { items };
       });
-      return { items };
     },
   }),
 ];

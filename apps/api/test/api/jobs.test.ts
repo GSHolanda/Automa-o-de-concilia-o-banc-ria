@@ -140,7 +140,8 @@ describe('rotas /jobs', () => {
     const auditor = await userWithRole(app, admin, 'auditor');
     expect((await auditor.get('/jobs')).status).toBe(200);
     const anyJob = first.body.items[0].id;
-    expect((await auditor.post(`/jobs/${anyJob}/retry`)).status).toBe(403);
+    // Tipo fora do mapa de permissões só é visível para quem tem settings.manage (achado 9).
+    expect((await auditor.post(`/jobs/${anyJob}/retry`)).status).toBe(404);
     // Trabalho na fila não pode ser "repetido".
     expect((await admin.post(`/jobs/${anyJob}/retry`)).body.error.code).toBe('invalid_status');
   });
@@ -153,6 +154,46 @@ describe('rotas /jobs', () => {
     const dead = mine.body.items.find((item: { type: string }) => item.type === 'test.fail');
     expect((await otherAdmin.get(`/jobs/${dead.id}`)).status).toBe(404);
     expect((await otherAdmin.post(`/jobs/${dead.id}/retry`)).status).toBe(404);
+  });
+});
+
+describe('achado 9: permissão por tipo de trabalho', () => {
+  async function deadJob(type: string, payload: Record<string, unknown>): Promise<string> {
+    const { job } = await asTenant(tenant.tenantId, (db) =>
+      enqueue(db, { tenantId: tenant.tenantId, type, payload, idempotencyKey: `morto-${type}-${Date.now()}` }),
+    );
+    await ownerPool().query(`UPDATE jobs SET status = 'dead', attempts = max_attempts, finished_at = now() WHERE id = $1`, [job.id]);
+    return job.id;
+  }
+
+  it('quem só importa não repete nem vê conciliação; repete e vê o que é de importação', async () => {
+    const created = await admin.post('/roles', { key: 'so-importa', name: 'Só importa', permissions: ['imports.view', 'imports.create'] });
+    expect(created.status).toBe(201);
+    const importer = await userWithRole(app, admin, 'so-importa');
+    const reconciliation = await deadJob('reconciliation.run', { runId: '00000000-0000-4000-8000-000000000001' });
+    const pull = await deadJob('connector.pull', { integrationId: '00000000-0000-4000-8000-000000000002', dateFrom: '2024-01-01', dateTo: '2024-01-02' });
+
+    const refused = await importer.post(`/jobs/${reconciliation}/retry`);
+    expect(refused.status).toBe(404);
+    expect((await importer.get(`/jobs/${reconciliation}`)).status).toBe(404);
+    const listed = await importer.get('/jobs?limit=200');
+    const types = new Set(listed.body.items.map((item: { type: string }) => item.type));
+    expect(types.has('reconciliation.run')).toBe(false);
+    expect(types.has('test.fail')).toBe(false);
+    expect(listed.body.items.some((item: { id: string }) => item.id === pull)).toBe(true);
+
+    const retried = await importer.post(`/jobs/${pull}/retry`);
+    expect(retried.status).toBe(200);
+    expect(retried.body.status).toBe('queued');
+    await ownerPool().query(`UPDATE jobs SET status = 'canceled' WHERE id = $1`, [pull]);
+
+    // Quem vê conciliação mas não a executa enxerga o trabalho e não o repete.
+    const viewer = await userWithRole(app, admin, 'auditor');
+    expect((await viewer.get(`/jobs/${reconciliation}`)).status).toBe(200);
+    expect((await viewer.post(`/jobs/${reconciliation}/retry`)).status).toBe(403);
+    // O administrador repete.
+    expect((await admin.post(`/jobs/${reconciliation}/retry`)).status).toBe(200);
+    await ownerPool().query(`UPDATE jobs SET status = 'canceled' WHERE id = $1`, [reconciliation]);
   });
 });
 

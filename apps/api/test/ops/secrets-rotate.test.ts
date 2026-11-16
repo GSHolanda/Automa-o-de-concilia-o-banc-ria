@@ -133,4 +133,26 @@ describe('secrets:rotate', () => {
     expect((error as Error).message).toContain(pending);
     expect(await rows()).toEqual(before);
   });
+
+  it('achado 10: segredo gravado com a chave anterior durante a troca é recifrado quando a chave anterior é informada', async () => {
+    await db.pool.query(`DELETE FROM integrations WHERE name = 'Corrompido'`);
+    const third = randomBytes(32);
+    // Sem a chave anterior, o segredo "Pendente" (versão 1, gravado na janela da troca) trava a troca.
+    await expect(rotate({ currentKey: NEW_KEY, newKey: third, newVersion: 3 })).rejects.toThrow(/não puderam ser decifrados/);
+    const result = await rotate({ currentKey: NEW_KEY, newKey: third, newVersion: 3, previousKeys: [{ version: 1, key: OLD_KEY }] });
+    expect(result.rotated).toBeGreaterThan(0);
+    for (const row of await rows()) {
+      if (!row.secret_ciphertext) continue;
+      expect(secretKeyVersion(row.secret_ciphertext)).toBe(3);
+      const plaintext = decryptSecret(third, { tenantId: row.tenant_id, integrationId: row.id }, row.secret_ciphertext);
+      expect(plaintext).toBe(plaintexts.get(row.id));
+    }
+    // Depois de reiniciar com a chave nova e a anterior, uma segunda passada recifra o que sobrou da janela.
+    const leftover = await insertIntegration(a.id, 'Gravado na janela', 'segredo-ficticio-janela', NEW_KEY, 2);
+    await expect(rotate({ currentKey: third, newKey: third, newVersion: 3 })).rejects.toThrow(/igual/);
+    const second = await rotate({ currentKey: third, newKey: third, newVersion: 3, previousKeys: [{ version: 2, key: NEW_KEY }] });
+    expect(second.rotated).toBe(1);
+    const stored = (await rows()).find((row) => row.id === leftover)!;
+    expect(decryptSecret(third, { tenantId: a.id, integrationId: leftover }, stored.secret_ciphertext!)).toBe('segredo-ficticio-janela');
+  });
 });

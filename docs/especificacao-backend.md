@@ -25,11 +25,14 @@ testes `test/api/auth.test.ts` e `test/helpers/app.ts`. Faltam:
   `src/cli.ts`: `db:migrate`, `platform:create-admin`, `tenant:create`, `audit:verify --tenant <slug>`.
 
 ### Autenticação — `modules/auth/routes.ts`
-- `POST /auth/login` (pública, limite 10/min por IP) `{email,password}`:
+- `POST /auth/login` (pública, limite 10/min por IP + e-mail) `{email,password}`:
   `auth_find_user`; inexistente → verificar contra `deps.dummyPasswordHash` e responder 401 `invalid_credentials`
-  ("E-mail ou senha inválidos."), resposta idêntica à de senha errada; conta bloqueada (`locked_until > now`): senha
-  correta → 423 `account_locked`, errada → 401; senha errada → `auth_register_login_failure` + auditoria
-  `auth.login_failed`; `status != active` → 403 `account_disabled`; empresa `archived` → 403 `tenant_unavailable`;
+  ("E-mail ou senha inválidos."), resposta idêntica à de senha errada; origem em espera
+  (`auth_login_blocked_until(usuário, IP)`, migração 0007): senha correta → 429 `login_throttled`, errada → 401, sem
+  nova contagem; senha errada → `auth_register_login_failure(usuário, IP, ...)` + auditoria `auth.login_failed` (a
+  espera vale só para o par conta + origem: 30 s a partir de `LOGIN_MAX_ATTEMPTS`, dobrando até `LOGIN_LOCK_MINUTES`);
+  `status != active` → 403 `account_disabled`; empresa `archived` → 403 `tenant_unavailable`; senha temporária com
+  mais de 72 h → 403 `temporary_password_expired`;
   sucesso → `auth_register_login_success`, sessão (token aleatório, grava só SHA-256; `expires_at` =
   agora + `sessionAbsoluteHours`; `idle_minutes` = `settings.security.sessionIdleMinutes`, 60 para plataforma),
   cookie `concilia_sid` (HttpOnly, SameSite=Lax, Secure conforme config, Path=/), auditoria `auth.login`,

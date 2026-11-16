@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   INTEGRATION_KINDS,
   integrationConfigSchemas,
+  integrationDestinationChanged,
   isIsoDate,
   diffDays,
   type IntegrationKind,
@@ -16,6 +17,7 @@ import {
   checkIntegration,
   findIntegration,
   initialStatus,
+  integrationAuditView,
   integrationView,
   IntegrationCheckError,
   newIntegrationId,
@@ -112,15 +114,14 @@ export const routes: RouteDefinition[] = [
           auth.userId,
         ],
       );
-      const view = integrationView(inserted.rows[0]!, current.modules);
       await audit({
         action: 'integration.created',
         entityType: 'integration',
         entityId: id,
         summary: `Integração ${body.name} (${body.kind}) cadastrada`,
-        after: view,
+        after: integrationAuditView(inserted.rows[0]!, current.modules),
       });
-      return created(view);
+      return created(integrationView(inserted.rows[0]!, current.modules));
     },
   }),
 
@@ -152,6 +153,13 @@ export const routes: RouteDefinition[] = [
       const row = await findIntegration(db, tenantId, params.id, true);
       assertKindModule(current, row.kind);
       const config = body.config === undefined ? row.config : parseConfig(row.kind, body.config);
+      // O segredo guardado nunca segue para um destino novo: é preciso informá-lo de novo ou apagá-lo.
+      if (row.secret_ciphertext && body.secret === undefined && integrationDestinationChanged(row.kind, row.config, config)) {
+        throw badRequest(
+          'Ao mudar o endereço ou a forma de autenticação, informe o segredo de novo (ou envie secret nulo para apagá-lo).',
+          'secret_required',
+        );
+      }
       let ciphertext = row.secret_ciphertext;
       if (body.secret === null) ciphertext = null;
       else if (body.secret !== undefined) ciphertext = sealSecret(deps.config, tenantId, row.id, body.secret);
@@ -181,8 +189,8 @@ export const routes: RouteDefinition[] = [
         entityType: 'integration',
         entityId: row.id,
         summary: `Integração ${view.name} alterada${body.secret !== undefined ? ' (segredo alterado)' : ''}`,
-        before: integrationView(row),
-        after: view,
+        before: integrationAuditView(row),
+        after: integrationAuditView(updated.rows[0]!, current.modules),
       });
       return view;
     },
@@ -204,7 +212,7 @@ export const routes: RouteDefinition[] = [
         entityType: 'integration',
         entityId: row.id,
         summary: `Integração ${row.name} excluída`,
-        before: integrationView(row),
+        before: integrationAuditView(row),
       });
       return noContent();
     },
@@ -218,27 +226,36 @@ export const routes: RouteDefinition[] = [
     url: '/integrations/:id/test',
     summary: 'Testar integração com chamada real (grava verified ou error)',
     params: idParams,
-    handler: async ({ db, tenantId, params, deps, audit, entitlements }) => {
-      const current = await entitlements();
-      const row = await findIntegration(db, tenantId, params.id, true);
-      assertKindModule(current, row.kind);
-      if (!row.active) throw conflict('A integração está inativa.', 'integration_inactive');
+    // A chamada externa (até dezenas de segundos) acontece sem transação aberta.
+    transaction: 'steps',
+    handler: async ({ tenantId, params, deps, transaction }) => {
+      const row = await transaction(async ({ db, entitlements }) => {
+        const found = await findIntegration(db, tenantId, params.id);
+        assertKindModule(await entitlements(), found.kind);
+        if (!found.active) throw conflict('A integração está inativa.', 'integration_inactive');
+        return found;
+      });
       let error: string | null = null;
       try {
         await checkIntegration(deps.config, row);
       } catch (failure) {
         error = failure instanceof IntegrationCheckError ? failure.message : 'Falha ao testar a integração.';
       }
-      const updated = await recordCheck(db, row, error);
-      const view = integrationView(updated, current.modules);
-      await audit({
-        action: 'integration.tested',
-        entityType: 'integration',
-        entityId: row.id,
-        summary: error === null ? `Integração ${row.name} verificada` : `Teste da integração ${row.name} falhou: ${error}`,
-        after: { status: view.status, lastError: view.lastError },
+      return transaction(async ({ db, audit, entitlements }) => {
+        const updated = await recordCheck(db, row, error);
+        if (!updated) {
+          throw conflict('A integração foi alterada ou excluída durante o teste. Teste de novo.', 'integration_changed');
+        }
+        const view = integrationView(updated, (await entitlements()).modules);
+        await audit({
+          action: 'integration.tested',
+          entityType: 'integration',
+          entityId: row.id,
+          summary: error === null ? `Integração ${row.name} verificada` : `Teste da integração ${row.name} falhou: ${error}`,
+          after: { status: view.status, lastError: view.lastError },
+        });
+        return view;
       });
-      return view;
     },
   }),
 

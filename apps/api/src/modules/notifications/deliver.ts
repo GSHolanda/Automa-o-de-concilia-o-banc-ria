@@ -1,6 +1,6 @@
 import { integrationConfigSchemas, type WebhookPayloadV1 } from '@concilia/core';
-import { withContext, type Db } from '../../db/context';
-import type { JobContext, JobHandler } from '../../jobs/types';
+import type { Db } from '../../db/context';
+import type { JobHandler, StepsJobContext } from '../../jobs/types';
 import { sendSmtp } from '../../integrations/smtp';
 import { sendWebhook, type DeliveryResult } from '../../integrations/webhook';
 import { scrubSecret } from '../../security/secrets';
@@ -17,7 +17,7 @@ interface DeliveryRow {
   payload: Record<string, unknown>;
 }
 
-async function attempt(context: JobContext, delivery: DeliveryRow, integration: IntegrationRow): Promise<DeliveryResult> {
+async function attempt(context: StepsJobContext, delivery: DeliveryRow, integration: IntegrationRow): Promise<DeliveryResult> {
   const config = context.deps.config;
   let secret: string | null = null;
   try {
@@ -59,43 +59,42 @@ async function record(db: Db, delivery: DeliveryRow, result: DeliveryResult): Pr
  * Entrega externa de uma notificação. `sent` só com sucesso real (2xx no webhook); cada falha fica
  * registrada como `failed` com o motivo e o trabalho é repetido com espera até o limite de tentativas.
  */
-async function deliver(context: JobContext): Promise<unknown> {
-  const { db, job, tenantId } = context;
+async function deliver(context: StepsJobContext): Promise<unknown> {
+  const { job, tenantId, transaction } = context;
   const deliveryId = typeof job.payload.deliveryId === 'string' ? job.payload.deliveryId : null;
   if (!deliveryId) throw new Error('Trabalho de entrega sem registro de entrega');
-  const found = await db.query<DeliveryRow>('SELECT * FROM notification_deliveries WHERE tenant_id = $1 AND id = $2', [
-    tenantId,
-    deliveryId,
-  ]);
-  const delivery = found.rows[0];
-  if (!delivery || delivery.status === 'sent' || delivery.status === 'skipped') {
-    return { deliveryId, skipped: true };
-  }
-  const integration = delivery.integration_id
-    ? (
-        await db.query<IntegrationRow>('SELECT * FROM integrations WHERE tenant_id = $1 AND id = $2', [
-          tenantId,
-          delivery.integration_id,
-        ])
-      ).rows[0]
-    : undefined;
-  if (!integration || !integration.active) {
-    await db.query(
-      `UPDATE notification_deliveries SET status = 'skipped', error = 'Integração inexistente ou inativa.'
-        WHERE tenant_id = $1 AND id = $2`,
-      [tenantId, deliveryId],
-    );
-    return { deliveryId, skipped: true };
-  }
+  const target = await transaction(async ({ db }) => {
+    const found = await db.query<DeliveryRow>('SELECT * FROM notification_deliveries WHERE tenant_id = $1 AND id = $2', [
+      tenantId,
+      deliveryId,
+    ]);
+    const delivery = found.rows[0];
+    if (!delivery || delivery.status === 'sent' || delivery.status === 'skipped') return null;
+    const integration = delivery.integration_id
+      ? (
+          await db.query<IntegrationRow>('SELECT * FROM integrations WHERE tenant_id = $1 AND id = $2', [
+            tenantId,
+            delivery.integration_id,
+          ])
+        ).rows[0]
+      : undefined;
+    if (!integration || !integration.active) {
+      await db.query(
+        `UPDATE notification_deliveries SET status = 'skipped', error = 'Integração inexistente ou inativa.'
+          WHERE tenant_id = $1 AND id = $2`,
+        [tenantId, deliveryId],
+      );
+      return null;
+    }
+    return { delivery, integration };
+  });
+  if (!target) return { deliveryId, skipped: true };
 
-  const result = await attempt(context, delivery, integration);
-  if (result.ok) {
-    await record(db, delivery, result);
-    return { deliveryId, status: 'sent', responseStatus: result.status };
-  }
-  // A falha é gravada em transação própria: a do trabalho é desfeita ao lançar o erro para nova tentativa.
-  await withContext(context.deps.pool, { tenantId }, (own) => record(own, delivery, result));
+  // Envio sem transação aberta; o resultado é gravado em seguida, em transação curta.
+  const result = await attempt(context, target.delivery, target.integration);
+  await transaction(({ db }) => record(db, target.delivery, result));
+  if (result.ok) return { deliveryId, status: 'sent', responseStatus: result.status };
   throw new Error(result.error ?? 'Falha na entrega');
 }
 
-export const notificationDeliverHandler: JobHandler = { run: deliver };
+export const notificationDeliverHandler: JobHandler = { transaction: 'steps', run: deliver };

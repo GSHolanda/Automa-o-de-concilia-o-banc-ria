@@ -65,6 +65,29 @@ describe('isBlockedAddress', () => {
     expect(isBlockedAddress('2606:2800:220:1:248:1893:25c8:1946', false)).toBe(false);
   });
 
+  it('achado 12: recusa faixas IPv6 de transição que embutem endereço IPv4', () => {
+    for (const address of [
+      '::127.0.0.1', // IPv4-compatível (::/96)
+      '2002:7f00:1::', // 6to4 de 127.0.0.1
+      '2002:a00:1::1', // 6to4 de 10.0.0.1
+      '2001:0:7f00:1::1', // Teredo
+      'fec0::1', // site-local
+      '64:ff9b:1::a9fe:a9fe', // NAT64 de uso local
+      '64:ff9b::7f00:1', // NAT64 conhecido de 127.0.0.1
+    ]) {
+      expect(isBlockedAddress(address, false), address).toBe(true);
+    }
+    // Endereços públicos de verdade continuam aceitos.
+    expect(isBlockedAddress('2001:4860:4860::8888', false)).toBe(false);
+    expect(isBlockedAddress('2a00:1450:4001:80b::200e', false)).toBe(false);
+  });
+
+  it('achado 12: metadados embutidos em IPv6 são recusados mesmo com endereços privados liberados', () => {
+    for (const address of ['::169.254.169.254', '::a9fe:a9fe', '64:ff9b::a9fe:a9fe', '64:ff9b:1::a9fe:a9fe', '2002:a9fe:a9fe::1']) {
+      expect(isBlockedAddress(address, true), address).toBe(true);
+    }
+  });
+
   it('com endereços privados liberados, metadados continuam recusados', () => {
     expect(isBlockedAddress('127.0.0.1', true)).toBe(false);
     expect(isBlockedAddress('10.0.0.5', true)).toBe(false);

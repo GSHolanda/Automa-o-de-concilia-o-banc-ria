@@ -1,9 +1,12 @@
 import { sanitizePermissions } from '@concilia/core';
+import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Db } from '../../db/context';
+import type { AuthContext } from '../../http/auth';
 import { badRequest, conflict, forbidden, notFound } from '../../http/errors';
-import { created, noContent, route, type RouteDefinition } from '../../http/route';
+import { created, noContent, route, SESSION_COOKIE, type RouteDefinition } from '../../http/route';
 import { generateTemporaryPassword, hashPassword, passwordProblem } from '../../security/password';
+import { sha256 } from '../../security/tokens';
 import type { Entitlements } from '../tenancy/entitlements';
 
 // ---------------------------------------------------------------------------
@@ -22,11 +25,12 @@ interface UserRow {
   last_login_at: Date | null;
   locked_until: Date | null;
   created_at: Date;
+  permissions: string[];
 }
 
 const USER_SELECT = `
   SELECT u.id, u.name, u.email, u.status, u.role_id, r.key AS role_key, r.name AS role_name,
-         u.must_change_password, u.last_login_at, u.locked_until, u.created_at
+         u.must_change_password, u.last_login_at, u.locked_until, u.created_at, r.permissions
     FROM users u
     JOIN roles r ON r.id = u.role_id AND r.tenant_id = u.tenant_id`;
 
@@ -129,6 +133,33 @@ async function revokeUserSessions(db: Db, tenantId: string, userId: string, reas
   return result.rowCount ?? 0;
 }
 
+/**
+ * Quem gerencia acesso não concede o que não tem: as permissões do papel (ou do usuário alterado)
+ * precisam estar contidas nas do autor. Impede que `users.manage` vire administrador por conta própria.
+ */
+function assertWithinActor(auth: AuthContext, permissions: readonly string[], message: string): void {
+  const missing = permissions.filter((key) => !auth.permissions.includes(key));
+  if (missing.length > 0) throw forbidden(message, 'permission_escalation');
+}
+
+const GRANT_MESSAGE = 'Você não pode conceder permissões que não tem.';
+const TARGET_MESSAGE = 'Você não pode alterar o acesso de quem tem permissões que você não tem.';
+
+/** Registra quem mexeu no acesso do usuário (criação, papel, situação, senha); usado pelos quatro olhos. */
+async function markAccessChanged(db: Db, tenantId: string, where: { userId?: string; roleId?: string }, actorId: string | null) {
+  await db.query(
+    `UPDATE users SET access_changed_by = $4, access_changed_at = now()
+      WHERE tenant_id = $1 AND (id = $2 OR role_id = $3)`,
+    [tenantId, where.userId ?? null, where.roleId ?? null, actorId],
+  );
+}
+
+/** Chave do limite por sessão (hash do cookie); sem cookie, pelo IP. */
+function sessionRateKey(req: FastifyRequest): string {
+  const token = req.cookies?.[SESSION_COOKIE];
+  return token ? `users|${sha256(token).toString('hex')}` : `users|${req.ip}`;
+}
+
 function isUniqueViolation(error: unknown, constraint: string): boolean {
   const pgError = error as { code?: string; constraint?: string };
   return pgError?.code === '23505' && pgError.constraint === constraint;
@@ -197,10 +228,13 @@ export const routes: RouteDefinition[] = [
     url: '/users',
     summary: 'Criar usuário',
     body: createUserBody,
-    handler: async ({ db, tenantId, body, deps, audit, entitlements, settings }) => {
+    // O e-mail é único na instalação (ADR-03): o limite reduz a sondagem de e-mails de outras empresas.
+    rateLimit: { max: 20, timeWindow: '10 minutes', key: sessionRateKey },
+    handler: async ({ db, tenantId, auth, body, deps, audit, entitlements, settings }) => {
       await lockTenantAccess(db, tenantId);
       const role = await findRole(db, tenantId, body.roleId);
       if (!role) throw badRequest('Papel inexistente.', 'invalid_role');
+      assertWithinActor(auth, role.permissions, GRANT_MESSAGE);
       await assertUserLimit(db, tenantId, await entitlements());
 
       const email = body.email.trim().toLowerCase();
@@ -226,6 +260,7 @@ export const routes: RouteDefinition[] = [
           ],
         );
         id = inserted.rows[0]!.id;
+        await markAccessChanged(db, tenantId, { userId: id }, auth.userId);
       } catch (error) {
         if (isUniqueViolation(error, 'users_email_unique')) {
           throw conflict('Já existe um usuário com este e-mail.', 'email_taken');
@@ -254,13 +289,19 @@ export const routes: RouteDefinition[] = [
     summary: 'Alterar nome, papel ou situação de um usuário',
     params: idParams,
     body: updateUserBody,
-    handler: async ({ db, tenantId, params, body, audit, entitlements }) => {
+    handler: async ({ db, tenantId, auth, params, body, audit, entitlements }) => {
       await lockTenantAccess(db, tenantId);
       const before = await findUser(db, tenantId, params.id);
+      const changesAccess = (body.roleId !== undefined && body.roleId !== before.role_id) || (body.status ?? before.status) !== before.status;
+      if (changesAccess && params.id === auth.userId) {
+        throw forbidden('Você não pode alterar o próprio papel nem a própria situação.', 'self_access');
+      }
+      if (changesAccess) assertWithinActor(auth, before.permissions, TARGET_MESSAGE);
       let roleId = before.role_id;
       if (body.roleId && body.roleId !== before.role_id) {
         const role = await findRole(db, tenantId, body.roleId);
         if (!role) throw badRequest('Papel inexistente.', 'invalid_role');
+        assertWithinActor(auth, role.permissions, GRANT_MESSAGE);
         roleId = role.id;
       }
       const status = body.status ?? before.status;
@@ -274,6 +315,7 @@ export const routes: RouteDefinition[] = [
         status,
       ]);
       await assertAdminRemains(db, tenantId);
+      if (changesAccess) await markAccessChanged(db, tenantId, { userId: params.id }, auth.userId);
 
       let revokedSessions = 0;
       if (status === 'disabled' && before.status !== 'disabled') {
@@ -301,8 +343,9 @@ export const routes: RouteDefinition[] = [
     url: '/users/:id/reset-password',
     summary: 'Gerar senha temporária para um usuário',
     params: idParams,
-    handler: async ({ db, tenantId, params, deps, audit }) => {
+    handler: async ({ db, tenantId, auth, params, deps, audit }) => {
       const user = await findUser(db, tenantId, params.id);
+      assertWithinActor(auth, user.permissions, TARGET_MESSAGE);
       const temporaryPassword = generateTemporaryPassword();
       await db.query(
         `UPDATE users
@@ -311,6 +354,7 @@ export const routes: RouteDefinition[] = [
           WHERE tenant_id = $1 AND id = $2`,
         [tenantId, params.id, await hashPassword(temporaryPassword, deps.config.passwordScryptCost)],
       );
+      await markAccessChanged(db, tenantId, { userId: params.id }, auth.userId);
       const revokedSessions = await revokeUserSessions(db, tenantId, params.id, 'password_reset');
       await audit({
         action: 'user.password_reset',
@@ -331,8 +375,9 @@ export const routes: RouteDefinition[] = [
     url: '/users/:id/revoke-sessions',
     summary: 'Encerrar todas as sessões de um usuário',
     params: idParams,
-    handler: async ({ db, tenantId, params, audit }) => {
+    handler: async ({ db, tenantId, auth, params, audit }) => {
       const user = await findUser(db, tenantId, params.id);
+      assertWithinActor(auth, user.permissions, TARGET_MESSAGE);
       const revokedSessions = await revokeUserSessions(db, tenantId, params.id, 'revoked_by_admin');
       await audit({
         action: 'user.sessions_revoked',
@@ -369,8 +414,9 @@ export const routes: RouteDefinition[] = [
     url: '/roles',
     summary: 'Criar papel',
     body: createRoleBody,
-    handler: async ({ db, tenantId, body, audit }) => {
+    handler: async ({ db, tenantId, auth, body, audit }) => {
       const permissions = sanitizePermissions(body.permissions);
+      assertWithinActor(auth, permissions, GRANT_MESSAGE);
       let id: string;
       try {
         const inserted = await db.query<{ id: string }>(
@@ -405,17 +451,20 @@ export const routes: RouteDefinition[] = [
     summary: 'Alterar papel',
     params: idParams,
     body: updateRoleBody,
-    handler: async ({ db, tenantId, params, body, audit }) => {
+    handler: async ({ db, tenantId, auth, params, body, audit }) => {
       await lockTenantAccess(db, tenantId);
       const before = await findRole(db, tenantId, params.id);
       if (!before) throw notFound('Papel não encontrado.');
       if (before.is_system) throw forbidden('Papéis do sistema não podem ser alterados.', 'system_role');
+      assertWithinActor(auth, before.permissions, TARGET_MESSAGE);
       const permissions = body.permissions ? sanitizePermissions(body.permissions) : before.permissions;
+      assertWithinActor(auth, permissions, GRANT_MESSAGE);
       await db.query(
         `UPDATE roles SET name = $3, description = $4, permissions = $5 WHERE tenant_id = $1 AND id = $2`,
         [tenantId, params.id, body.name ?? before.name, body.description ?? before.description, permissions],
       );
       await assertAdminRemains(db, tenantId);
+      if (body.permissions) await markAccessChanged(db, tenantId, { roleId: params.id }, auth.userId);
       const after = (await findRole(db, tenantId, params.id))!;
       await audit({
         action: 'role.updated',
@@ -437,11 +486,12 @@ export const routes: RouteDefinition[] = [
     url: '/roles/:id',
     summary: 'Excluir papel sem usuários',
     params: idParams,
-    handler: async ({ db, tenantId, params, audit }) => {
+    handler: async ({ db, tenantId, auth, params, audit }) => {
       await lockTenantAccess(db, tenantId);
       const role = await findRole(db, tenantId, params.id);
       if (!role) throw notFound('Papel não encontrado.');
       if (role.is_system) throw forbidden('Papéis do sistema não podem ser excluídos.', 'system_role');
+      assertWithinActor(auth, role.permissions, TARGET_MESSAGE);
       if (role.user_count > 0) {
         throw conflict('O papel está atribuído a usuários e não pode ser excluído.', 'role_in_use', {
           userCount: role.user_count,
