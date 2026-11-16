@@ -175,7 +175,7 @@ export function TokensApiPage() {
         message={`Revogar o token ${revoking?.name ?? ''}? Quem o usa perde o acesso imediatamente.`}
         confirmLabel="Revogar"
         destructive
-        onConfirm={() => revoking && revoke.mutate(revoking)}
+        onConfirm={() => { if (revoking) revoke.mutate(revoking); }}
         onCancel={() => setRevoking(null)}
       />
     </>

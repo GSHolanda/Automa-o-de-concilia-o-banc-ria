@@ -10,7 +10,9 @@ import { Field } from '../../components/Field';
 import { Money } from '../../components/Money';
 import { Pagination } from '../../components/Pagination';
 import { StatusBadge } from '../../components/StatusBadge';
+import { useAuth } from '../../auth';
 import { useWrite } from '../shared';
+import { SugerirIAModal } from './SugerirIA';
 import { doneMessage, useConflict, type Acoes } from './acoes';
 import { itemQuery, plural, SIDE_LABEL } from './comum';
 import { RECON_KEY, type Filters, type ItemStatus, type ReconItem, type Side } from './tipos';
@@ -130,6 +132,8 @@ function SingleList(props: Common & { lado: Side; onLado: (l: Side) => void }) {
 /** Pendentes/Divergentes: dois painéis com seleção e barra de conciliação manual. */
 function Manual(props: Common) {
   const conflict = useConflict();
+  const { hasModule } = useAuth();
+  const [aiOpen, setAiOpen] = useState(false);
   const [bank, setBank] = useState<Map<string, ReconItem>>(new Map());
   const [ledger, setLedger] = useState<Map<string, ReconItem>>(new Map());
   const [note, setNote] = useState('');
@@ -209,11 +213,15 @@ function Manual(props: Common) {
             >
               Conciliar selecionados
             </Button>
+            {hasModule('ai.assist') && props.status === 'pending' && bank.size > 0 && (
+              <Button onClick={() => setAiOpen(true)}>Sugerir categorias por IA</Button>
+            )}
             <Button variant="ghost" onClick={clear}>Limpar seleção</Button>
             {!ready && <span className="texto-suave conc-peq">Selecione ao menos um item de cada lado (até 50).</span>}
           </div>
         </div>
       )}
+      {aiOpen && <SugerirIAModal items={[...bank.values()]} onClose={() => setAiOpen(false)} />}
     </div>
   );
 }

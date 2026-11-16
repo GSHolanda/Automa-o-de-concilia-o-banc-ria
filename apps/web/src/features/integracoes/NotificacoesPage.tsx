@@ -231,7 +231,7 @@ function RulesTab({ writable }: { writable: boolean }) {
         message="Excluir esta regra de notificação?"
         confirmLabel="Excluir"
         destructive
-        onConfirm={() => deleting && del.mutate(deleting)}
+        onConfirm={() => { if (deleting) del.mutate(deleting); }}
         onCancel={() => setDeleting(null)}
       />
     </div>
