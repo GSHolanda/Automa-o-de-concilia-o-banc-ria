@@ -90,7 +90,7 @@ function LicenseBlock() {
   );
 }
 
-export function ModulosPage() {
+export function ModulosPage({ title = 'Módulos' }: { title?: string }) {
   const { can, readOnly, refresh } = useAuth();
   const writable = can('modules.manage') && !readOnly;
   const modules = useQuery({ queryKey: ['modules'], queryFn: () => api.get<{ items: ModuleItem[] }>('/modules') });
@@ -142,7 +142,7 @@ export function ModulosPage() {
 
   return (
     <>
-      <PageHeader title="Módulos" subtitle="Recursos do produto disponíveis para a empresa e a licença em vigor." />
+      <PageHeader title={title} subtitle="Recursos do produto disponíveis para a empresa e a licença em vigor." />
       <LicenseBlock />
       <DataTable
         caption="Catálogo de módulos"

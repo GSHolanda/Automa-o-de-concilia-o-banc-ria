@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { APP_ROUTES } from '../routes';
+import { AvisosSino } from './AvisosSino';
 
 interface MenuEntry {
   to: string;
@@ -116,6 +117,7 @@ export function AppShell() {
             <span aria-hidden="true">☰</span>
           </button>
           <div className="barra-empresa">{me.isPlatformAdmin ? `${me.productName} · Plataforma` : companyName}</div>
+          {!me.isPlatformAdmin && <AvisosSino />}
           <div className="usuario" ref={userRef}>
             <button
               type="button"

@@ -25,6 +25,9 @@ import { ImportacoesPage } from './features/importacoes/ImportacoesPage';
 import { NovaImportacaoPage } from './features/importacoes/NovaImportacaoPage';
 import { ConciliacaoPage } from './features/conciliacao/ConciliacaoPage';
 import { RelatoriosPage } from './features/relatorios/RelatoriosPage';
+import { IntegracoesPage } from './features/integracoes/IntegracoesPage';
+import { NotificacoesPage } from './features/integracoes/NotificacoesPage';
+import { TokensApiPage } from './features/integracoes/TokensApiPage';
 import { EmConstrucao } from './pages/EmConstrucao';
 
 export interface AppRoute {
@@ -77,7 +80,7 @@ const SETTINGS_DEFS: SettingsDef[] = [
   { path: 'papeis', title: 'Papéis', permission: 'users.manage' },
   { path: 'integracoes', title: 'Integrações', permission: 'integrations.manage' },
   { path: 'tokens-api', title: 'Tokens de API', permission: 'integrations.manage' },
-  { path: 'notificacoes', title: 'Notificações' },
+  { path: 'notificacoes', title: 'Notificações', permission: 'settings.manage' },
   { path: 'modelos-relatorio', title: 'Modelos de relatório' },
   { path: 'modulos', title: 'Módulos', permission: 'modules.manage' },
   { path: 'licenca', title: 'Licença' },
@@ -100,6 +103,10 @@ const SETTINGS_ELEMENTS: Record<string, ReactNode> = {
   classificacao: <ClassificacaoPage />,
   'modelos-relatorio': <ModelosRelatorioPage />,
   modulos: <ModulosPage />,
+  licenca: <ModulosPage title="Licença" />,
+  integracoes: <IntegracoesPage />,
+  'tokens-api': <TokensApiPage />,
+  notificacoes: <NotificacoesPage />,
 };
 
 export const SETTINGS_ROUTES: AppRoute[] = SETTINGS_DEFS.map((r) => ({
