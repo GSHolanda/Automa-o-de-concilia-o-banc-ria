@@ -55,13 +55,13 @@ Premissas que não mudam:
 
 | Item | Situação |
 |---|---|
-| Domínio (`packages/core`) | 184 testes passando |
-| API (`apps/api`) | 258 testes passando (23 arquivos), banco PostgreSQL real em cada execução |
+| Domínio (`packages/core`) | 204 testes passando |
+| API (`apps/api`) | 303 testes passando (28 arquivos), banco PostgreSQL real em cada execução |
 | Ponta a ponta (`e2e`, Playwright) | 28 testes passando, 3 execuções seguidas sem falha |
 | Interface (`apps/web`) | todas as telas implementadas; build e verificação de tipos limpos |
 | Documentação | `docs/01` a `docs/09`, README, especificações, manuais |
 | Revisão de segurança | concluída: `docs/revisao-de-seguranca.md`, 14 achados (0 críticos, 3 altos, 5 médios, 6 baixos); nenhum vazamento de dados entre empresas pelas rotas |
-| Em andamento | correção dos achados altos e médios (ver seção 9) |
+| Correções da revisão | os 14 achados corrigidos; pendências parciais listadas na seção 8 |
 | Falta | `docs/10` e `docs/11`, seção "Situação" do plano |
 
 Repositório: `https://github.com/GSHolanda/Automa-o-de-concilia-o-banc-ria`, ramo `claude/ecstatic-davinci-ypsppf`.
@@ -98,11 +98,11 @@ Instalação completa: `docs/05-instalacao-e-atualizacao.md`. Empresa de demonst
 - **Auditoria** somente inserção, encadeada por SHA-256 por empresa, com verificação (`audit:verify`, `/audit/verify`).
 - **Sessões** no servidor (cookie HttpOnly + CSRF), revogáveis. Senhas com scrypt.
 - **Segredos** AES-256-GCM com AAD por empresa; chave mestra fora do banco; troca por `secrets:rotate`.
-- **Motor** determinístico (`packages/core/src/matching/engine.ts`, versão 1.1.0): concilia sozinho só por regra
+- **Motor** determinístico (`packages/core/src/matching/engine.ts`, versão 1.2.0): concilia sozinho só por regra
   (identificador+valor, valor+data+descrição, valor+data com candidato único); casos ambíguos, divergentes,
   agrupamentos, estornos, transferências e tarifas viram sugestões. Pontuação só ordena e explica.
 - **IA** opcional (módulo `ai.assist`): só sugere categoria, sempre com aceite humano.
-- Migrações somente para frente com checksum: `0001`–`0006` aplicadas. Nunca edite uma aplicada.
+- Migrações somente para frente com checksum: `0001`–`0007` aplicadas. Nunca edite uma aplicada.
 
 ## 5. O que foi entregue
 
@@ -129,6 +129,9 @@ Comandos da CLI (`pnpm cli <comando>`): `db:migrate`, `platform:create-admin`, `
 
 - Usuário pertence a uma única empresa (e-mail único na instalação).
 - Motor 1.1.0: item com candidato rejeitado por pessoa não é conciliado sozinho; o restante vira sugestão.
+- Motor 1.2.0: transações pendentes fora do período ou de outras contas contam como concorrentes na unicidade.
+- Login: espera progressiva por conta + origem (sem travar a conta para todos); senha temporária vence em 72 h;
+  `TRUST_PROXY` e `METRICS_TOKEN` obrigatórios em produção; mudar destino de integração exige informar o segredo de novo.
 - Par desfeito é tratado como rejeitado: não volta a ser proposto.
 - Categoria de uma classificação fica em `matches.category_id`; o registro de origem não muda.
 - Possível duplicidade na importação gera sugestão com `divergence='duplicate'` para decisão humana.
@@ -152,14 +155,16 @@ Comandos da CLI (`pnpm cli <comando>`): `db:migrate`, `platform:create-admin`, `
 - Seed de demonstração interrompido no meio deixa a empresa `demo` parcial (remover antes de rodar de novo).
 - Dados do seed são de janeiro de 2024: o painel abre vazio no mês corrente.
 - Campos de data usam o controle nativo do navegador (formato segue o idioma do navegador).
+- Pendências parciais da revisão de segurança: leitura de planilhas ainda no processo da API; CPF/CNPJ podem virar
+  identificador de pareamento; falta limite por empresa nas rotas de teste de integração e de IA, pool separado
+  para o trabalhador, `idle_in_transaction_session_timeout`, teto da fila e cota de arquivos por empresa; falta
+  permissão `roles.manage` separada e aviso aos administradores em mudanças sensíveis; destino da integração ainda
+  não entra nos dados autenticados da cifra; enumeração de e-mail entre empresas mitigada por limite (risco aceito, ADR-03).
 - Lista completa a consolidar em `docs/11-limitacoes-riscos-dependencias.md` (ainda não escrito).
 
 ## 9. Trabalho restante, em ordem
 
-1. Corrigir os achados de `docs/revisao-de-seguranca.md`, cada um com teste que reproduza o defeito antes da
-   correção: os altos 1 (motor concilia par "único" só porque o concorrente ficou fora do período/conta), 2 (XLSX
-   pequeno esgota a memória) e 3 (segredo enviado a novo destino sem ser informado de novo) e os médios 4 a 8.
-   Os baixos podem ser corrigidos se forem simples; os não corrigidos vão para `docs/11`.
+1. Concluído: os 14 achados da revisão de segurança foram corrigidos (detalhes no histórico e na seção 8).
 2. `docs/10-testes-e-resultados.md`: mapear cada critério CA-01…CA-28 de `docs/01-requisitos.md` para o arquivo de
    teste que o cobre e registrar os números reais das suítes (rodar todas antes de escrever).
 3. `docs/11-limitacoes-riscos-dependencias.md`: consolidar as seções 7 e 8 deste handoff, os itens "não

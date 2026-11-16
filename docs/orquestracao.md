@@ -49,10 +49,19 @@ Modelo e esforço são os informados pelo ambiente. Custo só aparece quando há
 | 7 (demo) | comando demo:seed | claude-sonnet-5-5 | medium | Empresa de demonstração pelos serviços da aplicação | 11 testes dos cenários | não |
 | 6 (e2e) | testes ponta a ponta | claude-sonnet-5-5 | medium | 21 testes no navegador; rota de contagens | 21 passando | não |
 | 7 (docs) | documentos 03, 05, 08 | claude-haiku-5-5 | low | Modelo de dados, instalação, operação | backup e restauração executados | não |
+| 3/5 (op/LGPD) | retenção, troca de chave, exportação e eliminação | claude-opus-5-5 | high | 4 operações com testes | API 258 | não |
+| 4 (telas) | integrações, tokens, notificações, avisos, IA | claude-sonnet-5-5 | medium | telas + 7 testes e2e | e2e 28 | não |
+| 6 (e2e) | corrida no logout | claude-sonnet-5-5 + orquestrador | medium | consultas canceladas no logout; e2e sai pela interface | e2e 28/28 ×3 | não |
+| 7 (docs) | 04, README, 06, 07, 09 | haiku / sonnet | low / medium | documentação | — | não |
+| 6 (revisão) | revisão de segurança | claude-fable-5-2 (revisor-critico) | high | 14 achados: 0 críticos, 3 altos, 5 médios, 6 baixos | 11 confirmados por execução | — |
+| 6 (correções) | achados 1–2 e 3–14 | claude-opus-5-5 | high | todos os 14 corrigidos (11 com mitigação parcial registrada) | core 204, API 303, e2e 28 | não |
 Modelo "solicitado": o ambiente aceitou o parâmetro na delegação. Confirmação do ambiente obtida em 16/11: as chamadas
 de opus, sonnet e haiku foram enviadas à API como `claude-opus-5-5`, `claude-sonnet-5-5` e `claude-haiku-5-5`.
 Os agentes de `.claude/agents/` passaram a ser reconhecidos após o reinício do processo da sessão.
-Consumo informado pelo ambiente por subagente: operação 88 mil tokens; base web 120 mil; E5 208 mil; E6 151 mil; E7 266 mil; telas 120 + 129 + 145 + 133 mil; E8 295 mil; demo 133 mil; E9 153 mil; E10 373 mil; telas 110 + 144 + 88 mil; seed 154 mil; e2e 286 mil; docs 192 mil.
+Consumo informado pelo ambiente por subagente: operação 88 mil tokens; base web 120 mil; E5 208 mil; E6 151 mil; E7 266 mil; telas 120 + 129 + 145 + 133 mil; E8 295 mil; demo 133 mil; E9 153 mil; E10 373 mil; telas 110 + 144 + 88 mil; seed 154 mil; e2e 286 mil; docs 192 mil; op/LGPD 217 mil; telas 187 mil; API/README 151 mil; manuais 314 mil; LGPD 165 mil; revisão 445 mil; correções 194 + 399 mil.
+
+Custo real da sessão informado pelo ambiente em 16/11 18:38 UTC: US$ 116,38. A partir do handoff, os commits são
+feitos exclusivamente em nome do titular (ver `CLAUDE.md`, seção Versionamento).
 
 Custo real da sessão do orquestrador até este ponto, informado pelo ambiente: US$ 16,60.
 
