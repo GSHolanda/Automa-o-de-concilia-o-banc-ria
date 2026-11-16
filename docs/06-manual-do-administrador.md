@@ -53,7 +53,7 @@ Regras da nova senha:
 - Não pode ser repetitiva demais (poucos caracteres diferentes).
 - Não pode conter a parte do seu e-mail antes do "@" (quando ela tem 4 letras ou mais).
 
-Depois de várias tentativas erradas de senha (padrão: 5), a conta fica bloqueada por um tempo (padrão: 15 minutos). Quem administra usuários vê o selo **Bloqueado** na lista. Esses números são da instalação, não da empresa (veja o manual de personalização).
+Depois de várias tentativas erradas de senha a partir do mesmo computador ou rede (padrão: 5), quem errou precisa esperar antes de tentar de novo: 30 segundos, dobrando a cada nova falha, até 15 minutos. A espera vale só para aquela origem: o titular continua entrando normalmente de outro lugar, para que ninguém consiga travar a conta de outra pessoa errando a senha de propósito. A senha temporária vence em 72 horas. Esses números são da instalação, não da empresa (veja o manual de personalização).
 
 Para sair, use o menu com o seu nome, no canto superior direito, e clique em **Sair**.
 
@@ -351,7 +351,7 @@ Na lista (**Nome**, **E-mail**, **Papel**, **Situação**, **Último acesso**):
 - **Editar**: muda **Nome**, **Papel** e **Situação** (Ativo ou Inativo). Ao inativar, as sessões do usuário são encerradas. O e-mail não muda.
 - **Redefinir senha**: gera nova senha temporária, mostrada uma vez, e encerra as sessões dele.
 - **Encerrar sessões**: desconecta o usuário de todos os dispositivos.
-- Selos na situação: **Ativo**/**Inativo**, **Bloqueado** (excesso de tentativas de senha) e **Senha temporária**.
+- Selos na situação: **Ativo**/**Inativo** e **Senha temporária**.
 
 A empresa precisa sempre de pelo menos um usuário ativo que gerencie usuários.
 

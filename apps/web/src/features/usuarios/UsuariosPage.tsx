@@ -66,7 +66,6 @@ export function UsuariosPage() {
       render: (u) => (
         <span className="linha" style={{ gap: 'var(--e1)' }}>
           <Badge tone={u.status === 'active' ? 'success' : 'neutral'}>{u.status === 'active' ? 'Ativo' : 'Inativo'}</Badge>
-          {u.lockedUntil && <Badge tone="danger">Bloqueado</Badge>}
           {u.mustChangePassword && <Badge tone="warning">Senha temporária</Badge>}
         </span>
       ),
