@@ -19,7 +19,7 @@ MIGRATION_DATABASE_URL='postgres://concilia_owner:...@host:5432/concilia' ./ops/
 
 ### Pontos de atenção
 
-- **O dump contém todos os dados**: hashes de senha, hashes de sessão e de token de API, conteúdo dos arquivos importados (`import_files`) e configurações de integração. Não é cifrado pelo script. Proteja o arquivo e controle o acesso à pasta `backups/`.
+- **O dump contém todos os dados**: hashes de senha, hashes de sessão e de token de API, conteúdo dos arquivos importados (`import_files`) e configurações de integração, com os segredos já cifrados (`secret_ciphertext`). Os segredos só decifram com a `SECRETS_MASTER_KEY` da versão em que foram gravados: guarde a chave (e as chaves antigas, enquanto houver backup que dependa delas) separada do dump. O dump em si não é cifrado pelo script. Proteja o arquivo e controle o acesso à pasta `backups/`.
 - **Não há rotação nem retenção**. O script não apaga backups antigos e não há agendamento no repositório. A periodicidade e a retenção precisam ser configuradas fora do projeto (por exemplo, cron ou agendador do servidor).
 - **Destino fixo**: o script sempre grava em `<raiz>/backups/`. Para outro destino, copie o arquivo depois.
 
@@ -40,6 +40,8 @@ CONFIRM=sim RESTORE_DATABASE_URL='postgres://concilia_owner:...@host:5432/concil
 Teste a restauração periodicamente em um banco separado, não só na primeira instalação. O teste desta seção pode servir de modelo.
 
 ## Teste executado
+
+Nota: este teste foi feito quando existiam quatro migrações. O repositório hoje tem seis (`0005_integrations.sql` e `0006_retention.sql`); um banco novo aplica as seis e `schema_migrations` terá seis linhas. As operações `secrets:rotate`, `tenant:export` e `tenant:purge` e o expurgo por retenção não fazem parte deste teste.
 
 Teste de backup e restauração feito no ambiente de desenvolvimento deste projeto, em 16/11/2026, com o PostgreSQL 16 local (`main`, porta 5432). Os comandos e resultados abaixo são os reais.
 
@@ -186,17 +188,79 @@ Teste feito neste ambiente: `audit:verify --platform` respondeu `intact: true`, 
 | Segredo | O que protege | Como trocar | Situação |
 |---|---|---|---|
 | `SESSION_SECRET` | Gera o token CSRF de cada sessão (HMAC). As sessões em si não dependem dele: o token da sessão é aleatório e só o hash SHA-256 fica no banco. | Gere novo valor (`openssl rand -hex 32`), atualize o `.env` e reinicie a API. | Automatizado só no sentido de ser lido da configuração. Efeito: as abas abertas recebem erro de CSRF e precisam ser recarregadas. As sessões continuam válidas. |
-| `SECRETS_MASTER_KEY` | Prevista para cifrar segredos de integração (AES-256-GCM, conforme o esquema). | Não há procedimento. | **Não implementado.** A chave é lida e validada na configuração, mas nenhum código a usa para cifrar ou decifrar. A coluna `integrations.secret_ciphertext` não é gravada pelo código atual. |
-| `SECRETS_KEY_VERSION` | Versão da chave mestra, prevista para a rotação. | Não há procedimento. | **Não implementado.** Depende do item anterior. A coluna `integrations.secret_key_version` também não é gravada pelo código atual. |
+| `SECRETS_MASTER_KEY` | Cifra os segredos de integração (AES-256-GCM, `apps/api/src/security/secrets.ts`). | `secrets:rotate` (seção abaixo). | Implementado. |
+| `SECRETS_KEY_VERSION` | Versão da chave mestra, gravada no primeiro byte de cada segredo cifrado e em `integrations.secret_key_version`. | Muda junto com a chave, ao fim do `secrets:rotate`. | Implementado. |
 | `METRICS_TOKEN` | Acesso ao `/metrics`. | Defina novo valor, reinicie a API e atualize o coletor do Prometheus. | Manual. Não há comando no repositório. |
 | Senha do papel `concilia_app` | Conexão da aplicação ao banco. | `ALTER ROLE concilia_app PASSWORD '...';` como superusuário, depois atualize `DATABASE_URL` e reinicie a API e o trabalhador. | Manual. |
 | Senha do papel `concilia_owner` | Migrações e backup. | `ALTER ROLE concilia_owner PASSWORD '...';`, depois atualize `MIGRATION_DATABASE_URL` e `BACKUP_DATABASE_URL`, se houver. | Manual. |
 | `CONCILIA_ADMIN_PASSWORD`, `DEMO_PASSWORD` | Senha inicial do operador da plataforma e dos usuários de demonstração. | Não são guardadas: são lidas no momento do comando da CLI. | Não se aplica a rotação. |
-| Tokens de API (prefixo `ck_`) | Entrada de lançamentos pela API. | O banco guarda o hash SHA-256 (`token_hash`) e o prefixo, nunca o token. A coluna `revoked_at` marca a revogação. | Não verificado neste documento qual rota faz a criação e a revogação. O código não tem comando de rotação em massa. |
+| Tokens de API (prefixo `ck_`) | Entrada de lançamentos pela API. | O banco guarda o hash SHA-256 (`token_hash`) e o prefixo, nunca o token. A coluna `revoked_at` marca a revogação. A criação e a revogação são rotas de `apps/api/src/modules/api-tokens/routes.ts` (permissão `integrations.manage`). | Manual, token a token. O código não tem comando de rotação em massa. |
 
 Não há comando para trocar a senha de todos os usuários de uma vez.
 
-Para trocar `SECRETS_MASTER_KEY` quando a cifra estiver implementada, será preciso recifrar os segredos existentes com a chave nova e registrar a versão em `secret_key_version`. Esse procedimento ainda não existe. Até lá, não há segredo cifrado gravado pelo código para recifrar.
+### Troca da chave mestra (`secrets:rotate`)
+
+Recifra todos os segredos de `integrations` com uma chave nova, em uma única transação (`apps/api/src/ops/secrets-rotate.ts`).
+
+Pré-condições:
+
+- `MIGRATION_DATABASE_URL` (papel dono do esquema): a operação cruza empresas.
+- `SECRETS_MASTER_KEY` com a chave atual, `NEW_SECRETS_MASTER_KEY` (32 bytes em base64, `openssl rand -base64 32`) e `NEW_SECRETS_KEY_VERSION` (inteiro de 1 a 255, diferente da versão atual).
+- Backup recente do banco. Guarde a chave antiga até confirmar que tudo funciona com a nova.
+
+```bash
+NEW_SECRETS_MASTER_KEY=... NEW_SECRETS_KEY_VERSION=2 node apps/api/dist/cli.js secrets:rotate
+```
+
+Comportamento:
+
+- Trava as linhas com segredo (`FOR UPDATE`): gravações concorrentes de segredo esperam o fim da troca.
+- Decifra cada segredo com a chave atual, cifra com a nova e decifra de volta para conferir antes de gravar. Segredos já na versão nova são pulados, depois de conferir que decifram com a chave nova.
+- Se algum segredo não decifrar (chave atual errada, dado corrompido), a operação inteira é cancelada e nada é alterado. A mensagem cita ids de integração, nunca o segredo.
+- Grava auditoria `integration.secrets_rotated` em cada empresa afetada e `platform.secrets_rotated` na trilha da plataforma.
+
+Depois do comando, **a API e o trabalhador continuam com a chave antiga na memória e não conseguem mais decifrar os segredos**. Troque `SECRETS_MASTER_KEY` pela chave nova e `SECRETS_KEY_VERSION` pela versão nova no `.env` e reinicie a API e o trabalhador. Até lá, testes de integração, envio de webhook e e-mail, conector e IA falham. Faça a troca em janela combinada.
+
+## Retenção de arquivos originais
+
+- Cada empresa escolhe `imports.originalFileRetentionDays` (30 a 3650 dias; vazio desliga) nas configurações.
+- O trabalhador (`apps/api/src/jobs/worker.ts`, `apps/api/src/jobs/maintenance.ts`) verifica a cada hora e enfileira, no máximo uma vez por dia por empresa, o trabalho `maintenance.purge_import_files`. Ele roda só onde há trabalhador ativo (`WORKER_ENABLED=true` na API ou processo `worker-main.js`).
+- O trabalho apaga de `import_files` os arquivos de lotes processados há mais dias que a retenção e marca `import_batches.file_purged_at`. Lote, hash e estatísticas permanecem. Grava auditoria `import.files_purged`. Rodar de novo não acha nada.
+- Efeito colateral: ações que dependem do arquivo original (como reprocessar o lote) deixam de ser possíveis para lotes expurgados.
+- Backups feitos antes do expurgo ainda contêm os arquivos. A retenção dos backups é decisão da instalação.
+
+## Exportação e eliminação de uma empresa
+
+Os dois comandos usam `MIGRATION_DATABASE_URL`, passam por cima do isolamento por empresa e devem ser executados só por quem opera a instalação.
+
+### `tenant:export`
+
+```bash
+node apps/api/dist/cli.js tenant:export --tenant minha-empresa --out /caminho/exportacao.ndjson [--include-files]
+```
+
+- Gera NDJSON com cabeçalho, uma linha por registro e um resumo com contagens (`apps/api/src/ops/tenant-export.ts`). Lê tudo em uma transação somente leitura de leitura repetível (fotografia consistente).
+- Não exporta a tabela `sessions` nem colunas com hash de senha, texto cifrado, hash de token ou valor de segredo.
+- `--include-files` inclui o conteúdo de `import_files` em base64; sem ela, os arquivos originais ficam de fora.
+- Não sobrescreve arquivo existente. O arquivo é criado com permissão 0600. Se a exportação falhar no meio, o arquivo parcial é removido.
+- Grava auditoria `tenant.data_exported` na trilha da empresa.
+- O arquivo contém dados pessoais e financeiros sem cifra: proteja o destino e apague quando cumprir a finalidade.
+
+### `tenant:purge`
+
+```bash
+node apps/api/dist/cli.js tenant:purge --tenant minha-empresa --confirm minha-empresa
+```
+
+- Só elimina empresa **arquivada** (`status = archived`); caso contrário recusa. Exige repetir o slug em `--confirm`.
+- Apaga, em uma transação, todas as linhas de todas as tabelas com `tenant_id` (descobertas pelo catálogo) e a linha da empresa, inclusive registros de origem e a trilha de auditoria da empresa. Para isso, desabilita dentro da transação os gatilhos que barram `DELETE` e os reabilita antes do `COMMIT`. Confere que nada restou; se restar, desfaz tudo.
+- É irreversível. Antes: `tenant:export`, backup, e confirmação de quem responde pela empresa.
+- Ressalvas operacionais:
+  - O `ALTER TABLE ... DISABLE TRIGGER` trava as tabelas até o fim da transação. **Gravações de todas as empresas nessas tabelas esperam**, e a eliminação desiste após 30 s de espera por travas (`lock_timeout`). Execute em janela de baixo uso.
+  - **Registros da trilha da plataforma que citam nome, slug e CNPJ da empresa não são apagados** (têm `tenant_id` nulo). A eliminação grava ainda `platform.tenant_purged`, só com o identificador da empresa e contagens.
+  - Backups anteriores continuam com os dados da empresa até serem descartados pela política da instalação.
+
+Detalhes de LGPD em `docs/09-seguranca-lgpd.md`.
 
 ## Falhas comuns
 
@@ -224,8 +288,8 @@ Para trocar `SECRETS_MASTER_KEY` quando a cifra estiver implementada, será prec
 ### Disco cheio
 
 - **Sintoma**: erros de escrita no PostgreSQL. Backups falham. A API pode responder erro interno ao gravar.
-- **Causas prováveis**: o crescimento de `import_files`, que guarda o conteúdo original dos arquivos, e da trilha `audit_log`. O repositório não tem política de expurgo para `import_files`. O expurgo deve ser decidido pela política de retenção da instalação.
-- **Ação**: libere espaço antes de tudo. Não apague linhas de `audit_log` (a tabela não permite). Antes de qualquer expurgo, faça backup.
+- **Causas prováveis**: o crescimento de `import_files`, que guarda o conteúdo original dos arquivos, e da trilha `audit_log`. Para `import_files`, a empresa pode configurar a retenção (seção "Retenção de arquivos originais"); sem ela, nada é expurgado. A trilha `audit_log` não tem expurgo.
+- **Ação**: libere espaço antes de tudo. Não apague linhas de `audit_log` (a tabela não permite). Antes de qualquer expurgo manual, faça backup.
 - **Backup com disco cheio**: o `pg_dump` gera o arquivo na pasta `backups/`. Se faltar espaço, o dump falha e o arquivo parcial deve ser removido antes de tentar de novo.
 
 ### Trilha de auditoria quebrada

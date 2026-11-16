@@ -105,10 +105,10 @@ O e2e usa `TEST_ADMIN_DATABASE_URL` (padrão `postgres://postgres:postgres@local
 | [`docs/03-modelo-de-dados.md`](docs/03-modelo-de-dados.md) | Modelo de dados e esquema | Disponível |
 | [`docs/04-api-e-conectores.md`](docs/04-api-e-conectores.md) | Referência da API, rotas, webhooks e conectores | Disponível |
 | [`docs/05-instalacao-e-atualizacao.md`](docs/05-instalacao-e-atualizacao.md) | Instalação e atualização | Disponível |
-| `docs/06-manual-do-administrador.md` | Manual do administrador da empresa | A escrever |
-| `docs/07-manual-de-personalizacao.md` | Como personalizar regras, perfis e modelos por empresa | A escrever |
+| [`docs/06-manual-do-administrador.md`](docs/06-manual-do-administrador.md) | Manual do administrador da empresa | Disponível |
+| [`docs/07-manual-de-personalizacao.md`](docs/07-manual-de-personalizacao.md) | Como personalizar regras, perfis e modelos por empresa | Disponível |
 | [`docs/08-operacao-backup-recuperacao.md`](docs/08-operacao-backup-recuperacao.md) | Operação, backup e recuperação | Disponível |
-| `docs/09-seguranca-e-lgpd.md` | Segurança e LGPD | A escrever |
+| [`docs/09-seguranca-lgpd.md`](docs/09-seguranca-lgpd.md) | Segurança e LGPD (controles técnicos) | Disponível |
 | `docs/10-testes-e-resultados.md` | Testes e resultados | A escrever |
 | `docs/11-limitacoes.md` | Limitações conhecidas | A escrever |
 | [`docs/especificacao-backend.md`](docs/especificacao-backend.md) | Contrato das etapas E5 a E10 | Disponível |

@@ -27,8 +27,8 @@ export function ImportacoesPage() {
 
   const list = useQuery({
     queryKey: [...IMPORTS_KEY, 'list', { source, status, cursor }],
-    queryFn: () =>
-      api.get<Page<ImportBatch>>('/imports', { sourceKind: source, status, cursor, limit: PAGE_SIZE }),
+    queryFn: ({ signal }) =>
+      api.get<Page<ImportBatch>>('/imports', { sourceKind: source, status, cursor, limit: PAGE_SIZE }, signal),
     placeholderData: (previous) => previous,
     // Atualiza sozinho enquanto houver lote na fila ou em processamento.
     refetchInterval: (query) => (query.state.data?.items.some((b) => isRunning(b.status)) ? 2000 : false),

@@ -1,7 +1,7 @@
 # 03. Modelo de dados
 
 Este documento descreve o esquema do PostgreSQL a partir das migrações em `apps/api/migrations/`:
-`0001_base.sql`, `0002_config.sql`, `0003_data.sql` e `0004_functions.sql`. Não há migração além da 0004.
+`0001_base.sql`, `0002_config.sql`, `0003_data.sql`, `0004_functions.sql`, `0005_integrations.sql` e `0006_retention.sql`. Não há migração além da 0006. As migrações 0005 e 0006 não criam tabelas: só acrescentam colunas, restrições, índices e uma função.
 
 O banco tem 31 tabelas públicas: 30 de domínio e `schema_migrations`, a tabela de controle do executor de migrações (`apps/api/src/db/migrate.ts`).
 
@@ -190,6 +190,7 @@ Legenda da coluna RLS: "sim, isolamento padrão" é a política `tenant_isolatio
 
 **`notification_rules`**: regras de notificação.
 - Colunas principais: `event` text; `channel` (`in_app`, `email`, `webhook`); `target` jsonb (`roleKeys` para dentro do sistema, `emails` para e-mail; no webhook a destinação é a integração); `integration_id` (FK composta para `integrations`); `template` jsonb; `active`.
+- Índice parcial `notification_rules_event` (0005) em `(tenant_id, event)` onde `active`, para achar as regras de um evento.
 - Chaves: PK `id`; `UNIQUE (tenant_id, id)`.
 - RLS: sim, isolamento padrão.
 
@@ -206,8 +207,9 @@ Legenda da coluna RLS: "sim, isolamento padrão" é a política `tenant_isolatio
 ### Importação
 
 **`import_batches`**: lote de importação.
-- Colunas principais: `source_kind` (`bank`, `ledger`); `bank_account_id`; `profile_id`; `origin` (`upload`, `api`, `connector`); `file_name`; `file_format` (`ofx`, `csv`, `xlsx`, `json`); `file_sha256` text; `file_size` integer; `status` (`uploaded`, `queued`, `processing`, `completed`, `completed_with_errors`, `failed`, `canceled`); `config` jsonb (mapeamento efetivamente usado, copiado do perfil na confirmação); `stats` jsonb; `error`; `processed_at`.
-- Chaves e índices únicos: PK `id`; `UNIQUE (tenant_id, id)`; FKs compostas para `bank_accounts` e `import_profiles`.
+- Colunas principais: `source_kind` (`bank`, `ledger`); `bank_account_id`; `profile_id`; `origin` (`upload`, `api`, `connector`); `idempotency_key` text (0005; 1 a 200 caracteres, opcional); `api_token_id` e `integration_id` (0005; FKs compostas opcionais para `api_tokens` e `integrations`, preenchidas nos lotes vindos da API de entrada e do conector); `file_name`; `file_format` (`ofx`, `csv`, `xlsx`, `json`); `file_sha256` text; `file_size` integer; `status` (`uploaded`, `queued`, `processing`, `completed`, `completed_with_errors`, `failed`, `canceled`); `config` jsonb (mapeamento efetivamente usado, copiado do perfil na confirmação); `stats` jsonb; `error`; `processed_at`; `file_purged_at` timestamptz (0006: momento em que o arquivo original foi removido pelo expurgo por retenção; o lote, o hash e as estatísticas permanecem).
+- Chaves e índices únicos: PK `id`; `UNIQUE (tenant_id, id)`; FKs compostas para `bank_accounts`, `import_profiles`, `api_tokens` e `integrations`.
+- **Índice único parcial `import_batches_idempotency`** (0005) em `(tenant_id, origin, idempotency_key)`, onde a chave não é nula: a mesma chave de idempotência devolve o mesmo lote.
 - **Índice único parcial `import_batches_file_unique`** em `(tenant_id, source_kind, conta, file_sha256)`, onde `status` não é `failed` nem `canceled`. O mesmo arquivo não entra duas vezes para a mesma conta e origem; lotes falhos ou cancelados não contam.
 - RLS: sim, isolamento padrão.
 
@@ -215,7 +217,7 @@ Legenda da coluna RLS: "sim, isolamento padrão" é a política `tenant_isolatio
 - Colunas principais: `batch_id` (PK, sem `id` próprio); `content` bytea; `created_at`.
 - Chaves: PK `batch_id`; FK composta para `import_batches`.
 - RLS: sim, isolamento padrão.
-- O papel da aplicação tem `SELECT`, `INSERT` e `DELETE` nesta tabela, sem `UPDATE`. Não há código de expurgo no repositório (ver `docs/08-operacao-backup-recuperacao.md`).
+- O papel da aplicação tem `SELECT`, `INSERT` e `DELETE` nesta tabela, sem `UPDATE`. O expurgo por retenção (`maintenance.purge_import_files`, `apps/api/src/modules/imports/retention.ts`) apaga as linhas de lotes processados há mais dias que `imports.originalFileRetentionDays` (30 a 3650; nulo desliga) e marca `import_batches.file_purged_at`. Ver `docs/08-operacao-backup-recuperacao.md` e `docs/09-seguranca-lgpd.md`.
 
 **`import_rejections`**: linhas rejeitadas.
 - Colunas principais: `id` bigint (identidade); `batch_id`; `row_number` integer; `kind` (`invalid`: linha ilegível; `conflict`: identificador já existente com conteúdo diferente); `reason`; `raw` jsonb.
@@ -248,8 +250,8 @@ Os dois registros têm a trigger `source_record_immutable` (ver seção de imuta
 - RLS: sim, isolamento padrão.
 
 **`matches`**: decisão de conciliação.
-- Colunas principais: `run_id` (FK composta, opcional); `bank_account_id`; `match_type` (`identifier`, `amount_date`, `tolerance`, `group`, `internal_transfer`, `reversal`, `classification`, `manual`, `ignored`); `status` (`suggested`: aguarda revisão; `pending_approval`: aguarda segunda aprovação; `confirmed`: vigente; `rejected`, `superseded` e `undone`: encerradas); `origin` (`engine`, `user`); `auto_confirmed`; `rule_code`; `engine_version`; `confidence` numeric(5,4); `breakdown` jsonb; `explanation`; `difference_cents` bigint; `date_diff_days` integer; `divergence` (`amount`, `date`, `duplicate`); `ambiguous` boolean; `category_id`; `pair_key` text (identidade do conjunto de itens); campos de proposta, decisão e desfazimento (`proposed_by`, `proposed_at`, `proposal_note`, `decided_by`, `decided_at`, `decision_note`, `undone_by`, `undone_at`, `undo_reason`).
-- Chaves e índices: PK `id`; `UNIQUE (tenant_id, id)`; índice `matches_tenant_status` em `(tenant_id, status, created_at DESC)`; índice parcial `matches_pair` em `(tenant_id, pair_key)` onde `status = 'rejected'`, usado para não repetir sugestão já rejeitada; índice `matches_run`.
+- Colunas principais: `run_id` (FK composta, opcional); `bank_account_id`; `match_type` (`identifier`, `amount_date`, `tolerance`, `group`, `internal_transfer`, `reversal`, `classification`, `manual`, `ignored`); `status` (`suggested`: aguarda revisão; `pending_approval`: aguarda segunda aprovação; `confirmed`: vigente; `rejected`, `superseded` e `undone`: encerradas); `origin` (`engine`, `user`, `ai`; `ai` foi acrescentado na 0005 para sugestões de classificação de provedor de IA, que nunca são confirmadas sozinhas); `auto_confirmed`; `rule_code`; `engine_version`; `confidence` numeric(5,4); `breakdown` jsonb; `explanation`; `difference_cents` bigint; `date_diff_days` integer; `divergence` (`amount`, `date`, `duplicate`); `ambiguous` boolean; `category_id`; `pair_key` text (identidade do conjunto de itens); campos de proposta, decisão e desfazimento (`proposed_by`, `proposed_at`, `proposal_note`, `decided_by`, `decided_at`, `decision_note`, `undone_by`, `undone_at`, `undo_reason`).
+- Chaves e índices: PK `id`; `UNIQUE (tenant_id, id)`; índice `matches_tenant_status` em `(tenant_id, status, created_at DESC)`; índice parcial `matches_pair` em `(tenant_id, pair_key)` onde `status = 'rejected'`, usado para não repetir sugestão já rejeitada; índice `matches_run`. Índice parcial `matches_origin_open` (0005) em `(tenant_id, origin, status)` onde `origin = 'ai'`, para listar sugestões de IA em aberto.
 - RLS: sim, isolamento padrão.
 
 **`match_items`**: itens de cada decisão.
@@ -309,7 +311,7 @@ Toda ligação entre tabelas de empresa usa `(tenant_id, id)`. Exemplo: `bank_tr
 
 ### Funções `SECURITY DEFINER`
 
-Estas funções rodam com os privilégios do dono do esquema. Todas têm `SET search_path = public, pg_temp`. Na migração 0004, foram revogadas de `PUBLIC` e concedidas só a `concilia_app`.
+Estas funções rodam com os privilégios do dono do esquema. Todas têm `SET search_path = public, pg_temp`. Na migração 0004, foram revogadas de `PUBLIC` e concedidas só a `concilia_app`; a `maintenance_retention_tenants()` (0006) recebe o mesmo tratamento.
 
 | Função | Por que existe |
 |---|---|
@@ -322,6 +324,7 @@ Estas funções rodam com os privilégios do dono do esquema. Todas têm `SET se
 | `api_token_find(token_hash)` | Resolve o token de API em empresa e escopos antes de haver contexto. |
 | `jobs_claim(worker, limit)` | O trabalhador pega trabalhos de qualquer empresa, com `FOR UPDATE SKIP LOCKED`. Depois executa cada trabalho no contexto da empresa dona. |
 | `jobs_release_stale(timeout)` | Devolve à fila, ou encerra como `dead`, trabalhos travados de qualquer empresa. |
+| `maintenance_retention_tenants()` (0006) | Devolve só os ids das empresas com `imports.originalFileRetentionDays` numérico em `tenant_settings`. O trabalhador usa a lista para agendar, uma vez por dia, o expurgo de arquivos de cada empresa; o trabalho em si roda no contexto da própria empresa. |
 | `ops_queue_stats()` | Apenas contagens por situação da fila, para as métricas. Não expõe conteúdo de empresa. |
 
 Como essas funções atravessam empresas, a concessão é a parte sensível. Por isso são poucas, de escopo estreito e sem parâmetro de empresa livre, exceto `auth_find_*` e `api_token_find`, que recebem uma chave de busca (e-mail ou hash).

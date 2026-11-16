@@ -72,6 +72,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    // Desativa as consultas periódicas e aborta as em andamento antes de encerrar a sessão no servidor.
+    setStatus('anonymous');
+    await queryClient.cancelQueries();
     try {
       await api.post('/auth/logout');
     } catch {

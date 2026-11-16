@@ -32,15 +32,15 @@ function useMenu(): MenuEntry[] {
 }
 
 export function AppShell() {
-  const { me, logout, readOnly, can } = useAuth();
+  const { me, logout, readOnly, can, status } = useAuth();
   const menu = useMenu();
   // Contagem de aprovações pendentes no menu (só para quem pode ver o painel e aprovar).
-  const showApprovals = can('reconciliation.approve') && can('dashboard.view') && !me?.isPlatformAdmin;
+  const showApprovals = status === 'authenticated' && can('reconciliation.approve') && can('dashboard.view') && !me?.isPlatformAdmin;
   const approvals = useQuery({
     queryKey: ['approvals-count'],
     enabled: showApprovals,
     refetchInterval: 60_000,
-    queryFn: () => api.get<{ pendingApprovals: number }>('/dashboard'),
+    queryFn: ({ signal }) => api.get<{ pendingApprovals: number }>('/dashboard', undefined, signal),
   });
   const pendingApprovals = approvals.data?.pendingApprovals ?? 0;
   const location = useLocation();

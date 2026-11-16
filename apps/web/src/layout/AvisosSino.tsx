@@ -4,6 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { api, errorMessage } from '../api/client';
 import { Button } from '../components/Button';
 import { DateText } from '../components/DateText';
+import { useAuth } from '../auth';
 import { useWrite } from '../features/shared';
 
 interface Aviso {
@@ -27,7 +28,14 @@ export function AvisosSino() {
   const ref = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const queryClient = useQueryClient();
-  const q = useQuery({ queryKey: KEY, refetchInterval: 60_000, queryFn: () => api.get<Avisos>('/notifications', { limit: 20 }) });
+  const { status } = useAuth();
+  // Consulta periódica só enquanto houver sessão autenticada; o sinal cancela a requisição ao sair.
+  const q = useQuery({
+    queryKey: KEY,
+    enabled: status === 'authenticated',
+    refetchInterval: status === 'authenticated' ? 60_000 : false,
+    queryFn: ({ signal }) => api.get<Avisos>('/notifications', { limit: 20 }, signal),
+  });
   const unread = q.data?.unreadCount ?? 0;
 
   const read = useWrite<string>({ invalidate: [KEY], mutationFn: (id) => api.post(`/notifications/${id}/read`) });

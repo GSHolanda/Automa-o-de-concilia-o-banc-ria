@@ -34,7 +34,7 @@ export function ExecutarModal({ open, onClose, initial }: {
   const run = useQuery({
     queryKey: [...RECON_KEY, 'run', runId],
     enabled: runId !== null,
-    queryFn: () => api.get<Run>(`/reconciliation/runs/${runId}`),
+    queryFn: ({ signal }) => api.get<Run>(`/reconciliation/runs/${runId}`, undefined, signal),
     refetchInterval: (q) => (q.state.data && (q.state.data.status === 'completed' || q.state.data.status === 'failed') ? false : 2000),
   });
   const status = run.data?.status;

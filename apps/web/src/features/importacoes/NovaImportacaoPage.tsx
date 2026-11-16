@@ -354,7 +354,7 @@ function TabularView({ preview, loading, onSheet }: { preview: TabularPreview; l
 function Progress({ id }: { id: string }) {
   const batch = useQuery({
     queryKey: [...IMPORTS_KEY, 'detail', id],
-    queryFn: () => api.get<ImportBatch>(`/imports/${id}`),
+    queryFn: ({ signal }) => api.get<ImportBatch>(`/imports/${id}`, undefined, signal),
     refetchInterval: (q) => (!q.state.data || isRunning(q.state.data.status) ? 2000 : false),
   });
   const b = batch.data;

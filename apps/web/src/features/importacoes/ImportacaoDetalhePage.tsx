@@ -53,7 +53,7 @@ export function ImportacaoDetalhePage() {
 
   const batchQuery = useQuery({
     queryKey: [...IMPORTS_KEY, 'detail', id],
-    queryFn: () => api.get<ImportBatch>(`/imports/${id}`),
+    queryFn: ({ signal }) => api.get<ImportBatch>(`/imports/${id}`, undefined, signal),
     refetchInterval: (q) => (isRunning(q.state.data?.status) || q.state.data?.job?.status === 'running' ? 2000 : false),
   });
   const batch = batchQuery.data;

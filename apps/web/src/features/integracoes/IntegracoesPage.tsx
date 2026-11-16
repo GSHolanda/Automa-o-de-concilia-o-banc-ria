@@ -43,7 +43,7 @@ function BuscarModal({ item, onClose }: { item: Integration; onClose: () => void
   const job = useQuery({
     queryKey: ['jobs', jobId],
     enabled: jobId !== null,
-    queryFn: () => api.get<JobView>(`/jobs/${jobId}`),
+    queryFn: ({ signal }) => api.get<JobView>(`/jobs/${jobId}`, undefined, signal),
     refetchInterval: (q) => (q.state.data && ['succeeded', 'dead', 'canceled'].includes(q.state.data.status) ? false : 2000),
   });
   const status = job.data?.status;
