@@ -61,7 +61,7 @@ function pdfText(buffer: Buffer): string {
   return lines.join('\n');
 }
 
-function csvRows(response: { raw: Buffer }): string[][] {
+function csvRows(response: { raw: Buffer }): any[][] {
   const text = response.raw.toString('utf8');
   return parseCsv(text.replace(/^\u{FEFF}/u, ''), ';');
 }
@@ -306,9 +306,9 @@ describe('resumo e lançamentos pendentes', () => {
     const rows = csvRows(csv);
     expect(rows[0]).toEqual(['Data', 'Descrição', 'Documento', 'Valor', 'Categoria', 'Conta']);
     expect(rows).toHaveLength(2);
-    expect(rows[1][0]).toBe('15/01/2024');
-    expect(rows[1][3]).toBe('-35,90');
-    expect(rows[1][4]).toBe(category.name);
+    expect(rows[1]![0]).toBe('15/01/2024');
+    expect(rows[1]![3]).toBe('-35,90');
+    expect(rows[1]![4]).toBe(category.name);
 
     const xlsx = await admin.post('/exports/pending-entries', { format: 'xlsx' });
     expect(xlsx.status).toBe(200);
