@@ -229,3 +229,7 @@ Importação (`src/modules/imports/`):
   `pending|divergent|reconciled|ignored|awaiting_approval`. Par desfeito é tratado como rejeitado. A categoria de uma
   classificação fica em `matches.category_id`. Utilitários de teste em `test/helpers/reconciliation.ts`.
 - Motor 1.1.0: item com candidato rejeitado por pessoa não é conciliado sozinho; o candidato restante vira sugestão.
+- E9 e E10 prontas e integradas. Rotas de E10: `/integrations` (+ `/:id/test`, `/:id/pull`), `/api-tokens`
+  (+ `/:id/revoke`), `/integrations/ledger/entries` e `/integrations/ledger/batches/:id` (token de API),
+  `/notification-rules`, `/notifications` (+ `/:id/read`, `/read-all`), `/notification-deliveries`,
+  `/ai/suggest-categories`. Contratos em `packages/core/src/contracts/v1`. `GET /reconciliation/counts` dá as contagens.

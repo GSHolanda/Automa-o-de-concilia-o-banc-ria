@@ -43,23 +43,29 @@ Modelo e esforço são os informados pelo ambiente. Custo só aparece quando há
 | 4 (telas) | importação | claude-sonnet-5-5 | medium | Lista, nova importação em passos, detalhe | build do web passa | não |
 | 7 (demo) | arquivos fictícios | claude-haiku-5-5 | low | Gerador determinístico de OFX, CSV e XLSX | 8 testes passando | não |
 | 3 (motor) | ajuste após achado da E8 | orquestrador | xhigh | Candidato restante após rejeição humana vira sugestão | core 173 passando | — |
+| 3 (E9) | exportação | claude-sonnet-5-5 | medium | CSV, XLSX e PDF; modelos de relatório | 15 testes novos | não |
+| 3/5 (E10) | integrações | claude-opus-5-5 | high | Cofre, tokens, API de entrada, webhooks, SMTP, conector REST, IA | 65 testes novos; API total 239 passando | não |
+| 4 (telas) | conciliação, painel, aprovações, relatórios | claude-sonnet-5-5 | medium | 3 tarefas de telas | build do web passa | não |
+| 7 (demo) | comando demo:seed | claude-sonnet-5-5 | medium | Empresa de demonstração pelos serviços da aplicação | 11 testes dos cenários | não |
+| 6 (e2e) | testes ponta a ponta | claude-sonnet-5-5 | medium | 21 testes no navegador; rota de contagens | 21 passando | não |
+| 7 (docs) | documentos 03, 05, 08 | claude-haiku-5-5 | low | Modelo de dados, instalação, operação | backup e restauração executados | não |
 Modelo "solicitado": o ambiente aceitou o parâmetro na delegação. Confirmação do ambiente obtida em 16/11: as chamadas
 de opus, sonnet e haiku foram enviadas à API como `claude-opus-5-5`, `claude-sonnet-5-5` e `claude-haiku-5-5`.
 Os agentes de `.claude/agents/` passaram a ser reconhecidos após o reinício do processo da sessão.
-Consumo informado pelo ambiente por subagente: operação 88 mil tokens; base web 120 mil; E5 208 mil; E6 151 mil; E7 266 mil; telas 120 + 129 + 145 + 133 mil; E8 295 mil; demo 133 mil.
+Consumo informado pelo ambiente por subagente: operação 88 mil tokens; base web 120 mil; E5 208 mil; E6 151 mil; E7 266 mil; telas 120 + 129 + 145 + 133 mil; E8 295 mil; demo 133 mil; E9 153 mil; E10 373 mil; telas 110 + 144 + 88 mil; seed 154 mil; e2e 286 mil; docs 192 mil.
 
 Custo real da sessão do orquestrador até este ponto, informado pelo ambiente: US$ 16,60.
 
 ## Próximos passos (fila de trabalho)
 Qualquer sessão pode continuar daqui lendo `CLAUDE.md`, este arquivo e as duas especificações.
 
-1. Concluídos: E8, telas de importação, arquivos fictícios de demonstração.
-2. Em andamento: E9 exportação (`dev-intermediario`); E10 integrações (`dev-complexo`, em cópia isolada);
-   telas de conciliação, painel e aprovações (`dev-intermediario`).
-3. Em seguida: telas de relatórios, integrações, tokens de API e notificações (`dev-intermediario`);
-   comando `demo:seed` que cria a empresa de demonstração, importa os arquivos e executa a conciliação (`dev-intermediario`).
-4. Testes ponta a ponta com Playwright (CA-26) e correção de incompatibilidades entre telas e API (`dev-intermediario`).
-5. Backup e restauração executados localmente; documentos 03 a 11 e manuais (`dev-simples`); seção "Situação" do plano.
-6. Revisão final de isolamento e segurança, uma única vez (`revisor-critico`).
+1. Concluídos e integrados: E5 a E10, telas principais, demonstração, testes ponta a ponta, documentos 03, 05 e 08.
+2. Em andamento: telas de integrações, tokens de API e notificações (`dev-intermediario`); operação e LGPD — expurgo
+   de arquivos por retenção, troca da chave mestra, exportação e eliminação de dados de uma empresa (`dev-complexo`);
+   documento 04 e README (`dev-simples`).
+3. Depois: manuais 06 e 07 e documento 09 (`dev-intermediario`); documento 10 com os números finais (`dev-simples`);
+   documento 11 e seção "Situação" do plano (orquestrador).
+4. Revisão final de isolamento e segurança, uma única vez (`revisor-critico`), e correções que ela apontar.
 
-Interrupções: em 15–16/11 o limite de uso da conta interrompeu três agentes; foram retomados do ponto em que pararam.
+Interrupções: em 15–16/11 o limite de uso da conta interrompeu agentes em três ocasiões; todos foram retomados do
+ponto em que pararam, sem refazer trabalho.
