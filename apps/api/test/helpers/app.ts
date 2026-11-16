@@ -93,7 +93,7 @@ export class ApiClient {
     }
     const response = await this.app.inject({
       method: method as 'GET',
-      url: url.startsWith('/api') || url.startsWith('/healthz') || url.startsWith('/readyz') || url.startsWith('/metrics') ? url : `/api/v1${url}`,
+      url: url.startsWith('/api/') || url.startsWith('/healthz') || url.startsWith('/readyz') || url.startsWith('/metrics') ? url : `/api/v1${url}`,
       headers: base,
       ...(payload === undefined ? {} : { payload: payload as object }),
     });

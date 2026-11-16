@@ -5,6 +5,11 @@ import { routes as auth } from './modules/auth/routes';
 import { routes as dashboard } from './modules/dashboard/routes';
 import { routes as exportsRoutes } from './modules/exports/routes';
 import { routes as imports } from './modules/imports/routes';
+import { routes as integrations } from './modules/integrations/routes';
+import { routes as ledgerInbound } from './modules/integrations/inbound';
+import { routes as apiTokens } from './modules/api-tokens/routes';
+import { routes as notifications } from './modules/notifications/routes';
+import { routes as ai } from './modules/ai/routes';
 import { routes as jobs } from './modules/jobs/routes';
 import { routes as onboarding } from './modules/onboarding/routes';
 import { routes as platform } from './modules/platform/routes';
@@ -26,4 +31,9 @@ export const routes: readonly RouteDefinition[] = [
   ...reconciliation,
   ...dashboard,
   ...exportsRoutes,
+  ...integrations,
+  ...ledgerInbound,
+  ...apiTokens,
+  ...notifications,
+  ...ai,
 ];

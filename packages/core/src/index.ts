@@ -14,3 +14,4 @@ export * from './matching/engine';
 export * from './permissions';
 export * from './modules';
 export * from './settings/schema';
+export * from './contracts/v1';

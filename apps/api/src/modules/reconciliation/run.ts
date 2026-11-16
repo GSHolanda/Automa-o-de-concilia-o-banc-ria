@@ -11,6 +11,7 @@ import {
 } from '@concilia/core';
 import type { Db } from '../../db/context';
 import type { JobContext, JobHandler, JobRecord } from '../../jobs/types';
+import { emitNotification } from '../notifications/service';
 import type { Entitlements } from '../tenancy/entitlements';
 import {
   insertMatchItems,
@@ -271,6 +272,22 @@ async function executeRun(context: JobContext): Promise<unknown> {
       `${output.stats.suggested} sugestão(ões), ${output.stats.divergences} divergência(s)`,
     after: { status: 'completed', stats },
     metadata: { jobId: job.id, engineVersion: output.engineVersion, startedBy: run.started_by },
+  });
+  await emitNotification(db, {
+    tenantId,
+    event: 'reconciliation.completed',
+    title: 'Conciliação concluída',
+    body:
+      `Período de ${run.period_start} a ${run.period_end}: ${output.stats.autoMatched} automática(s), ` +
+      `${output.stats.suggested} sugestão(ões), ${output.stats.divergences} divergência(s).`,
+    link: '/conciliacao',
+    data: {
+      runId: run.id,
+      bankAccountId: run.bank_account_id,
+      periodStart: run.period_start,
+      periodEnd: run.period_end,
+      stats: { autoMatched: output.stats.autoMatched, suggested: output.stats.suggested, divergences: output.stats.divergences },
+    },
   });
   return { runId: run.id, status: 'completed', stats };
 }

@@ -5,6 +5,7 @@ import {
   extractReferences,
   ImportConfigError,
   importProfileConfigSchema,
+  ledgerEntryInputV1Schema,
   mapTabular,
   normalizeDescription,
   normalizeIdentifier,
@@ -12,6 +13,7 @@ import {
 } from '@concilia/core';
 import type { Db } from '../../db/context';
 import type { JobContext, JobHandler, JobRecord } from '../../jobs/types';
+import { emitNotification } from '../notifications/service';
 import { loadEntitlements } from '../tenancy/entitlements';
 import {
   ImportContentError,
@@ -191,6 +193,63 @@ async function parseTabularFile(content: Buffer, batch: BatchRow): Promise<Parse
     periodStart: range.start,
     periodEnd: range.end,
   };
+}
+
+function rawOf(entry: unknown): Record<string, string> {
+  const source = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {};
+  const base = source.raw && typeof source.raw === 'object' ? (source.raw as Record<string, unknown>) : source;
+  const raw: Record<string, string> = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (base === source && key === 'raw') continue;
+    if (value === undefined || value === null) continue;
+    raw[key] = typeof value === 'string' ? value : JSON.stringify(value);
+  }
+  return raw;
+}
+
+/** Lote JSON (API de entrada e conector): `{ entries: LedgerEntryInputV1[] }`; cada item inválido vira rejeição. */
+function parseJsonFile(content: Buffer, batch: BatchRow): ParsedFile {
+  if (batch.source_kind !== 'ledger') throw new ImportContentError('Lote JSON só é aceito para lançamentos.');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content.toString('utf8'));
+  } catch {
+    throw new ImportContentError('O lote JSON é inválido.');
+  }
+  const entries = (parsed as { entries?: unknown } | null)?.entries;
+  if (!Array.isArray(entries)) throw new ImportContentError('O lote JSON não contém a lista "entries".');
+  const records: SourceRecord[] = [];
+  const rejections: Rejection[] = [];
+  entries.forEach((entry, index) => {
+    const raw = rawOf(entry);
+    const result = ledgerEntryInputV1Schema.safeParse(entry);
+    if (!result.success) {
+      const reason = result.error.issues
+        .map((issue) => (issue.path.length > 0 ? `${issue.path.join('.')}: ${issue.message}` : issue.message))
+        .join('; ');
+      rejections.push({ rowNumber: index + 1, kind: 'invalid', reason, raw });
+      return;
+    }
+    const value = result.data;
+    records.push({
+      rowNumber: index + 1,
+      date: value.date,
+      amountCents: value.amountCents,
+      description: value.description,
+      externalId: value.externalId,
+      document: value.document,
+      reference: value.reference,
+      counterparty: value.counterparty,
+      dueDate: value.dueDate,
+      bankAccountRef: value.bankAccountRef,
+      costCenter: value.costCenter,
+      category: value.category,
+      bankType: null,
+      raw,
+    });
+  });
+  const range = dateRange(records);
+  return { records, rejections, skipped: 0, periodStart: range.start, periodEnd: range.end };
 }
 
 // ---------------------------------------------------------------------------
@@ -553,6 +612,36 @@ async function assertMonthlyLimit(db: Db, tenantId: string): Promise<void> {
 // Manipulador
 // ---------------------------------------------------------------------------
 
+/** Evento de fim de importação: `import.completed` ou `import.failed`. */
+async function notifyImport(
+  db: Db,
+  batch: Pick<BatchRow, 'id' | 'tenant_id' | 'file_name' | 'source_kind' | 'origin' | 'bank_account_id'>,
+  status: 'completed' | 'completed_with_errors' | 'failed',
+  stats: Partial<ImportStats> | null,
+  error: string | null,
+): Promise<void> {
+  const failed = status === 'failed';
+  await emitNotification(db, {
+    tenantId: batch.tenant_id,
+    event: failed ? 'import.failed' : 'import.completed',
+    title: failed ? 'Importação com falha' : 'Importação concluída',
+    body: failed
+      ? `A importação de ${batch.file_name} falhou: ${error ?? 'erro não informado'}`
+      : `Importação de ${batch.file_name}: ${stats?.imported ?? 0} importado(s), ${stats?.rejected ?? 0} rejeitado(s).`,
+    link: `/importacoes/${batch.id}`,
+    data: {
+      batchId: batch.id,
+      fileName: batch.file_name,
+      sourceKind: batch.source_kind,
+      origin: batch.origin,
+      bankAccountId: batch.bank_account_id,
+      status,
+      stats,
+      error,
+    },
+  });
+}
+
 async function finishBatch(
   context: JobContext,
   batch: BatchRow,
@@ -577,6 +666,7 @@ async function finishBatch(
     after: { status, stats, error },
     metadata: { jobId: context.job.id, attempt: context.job.attempts },
   });
+  await notifyImport(context.db, batch, status, stats, error);
   const source = batch.source_kind;
   const metrics = context.deps.metrics.importRows;
   if (stats.imported) metrics.inc({ source, result: 'imported' }, stats.imported);
@@ -605,7 +695,11 @@ async function processImport(context: JobContext): Promise<unknown> {
   try {
     const account = batch.bank_account_id ? await findBankAccount(db, batch.tenant_id, batch.bank_account_id) : null;
     const parsed =
-      batch.file_format === 'ofx' ? parseOfxFile(content, batch, account) : await parseTabularFile(content, batch);
+      batch.file_format === 'ofx'
+        ? parseOfxFile(content, batch, account)
+        : batch.file_format === 'json'
+          ? parseJsonFile(content, batch)
+          : await parseTabularFile(content, batch);
     const invalid = parsed.rejections.length;
     stats.totalRows = parsed.records.length + invalid + parsed.skipped;
     stats.skipped = parsed.skipped;
@@ -655,11 +749,15 @@ export const importProcessHandler: JobHandler = {
   onDead: async (db, job, error) => {
     const batchId = batchIdOf(job);
     if (!batchId) return;
-    await db.query(
+    const message = `O processamento falhou após ${job.attempts} tentativa(s): ${error.slice(0, 500)}`;
+    const updated = await db.query<BatchRow>(
       `UPDATE import_batches SET status = 'failed', error = $3, processed_at = now()
-        WHERE tenant_id = $1 AND id = $2 AND status IN ('queued', 'processing')`,
-      [job.tenant_id, batchId, `O processamento falhou após ${job.attempts} tentativa(s): ${error.slice(0, 500)}`],
+        WHERE tenant_id = $1 AND id = $2 AND status IN ('queued', 'processing')
+        RETURNING *`,
+      [job.tenant_id, batchId, message],
     );
+    const batch = updated.rows[0];
+    if (batch) await notifyImport(db, batch, 'failed', batch.stats, message);
   },
   onRetry: async (db, job) => {
     const batchId = batchIdOf(job);

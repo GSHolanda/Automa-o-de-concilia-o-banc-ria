@@ -2,6 +2,7 @@ import { approvalRequired, pairKey, type ApprovalQuestion, type ApprovalSettings
 import type { Db } from '../../db/context';
 import { AppError, badRequest, conflict, forbidden, notFound } from '../../http/errors';
 import type { AuditInput } from '../../http/route';
+import { emitNotification } from '../notifications/service';
 import { findMatchRow, getMatchView, type MatchRow, type MatchView, type Side } from './queries';
 
 /** O necessário para decidir: transação, autor, auditoria e regras de aprovação efetivas. */
@@ -198,15 +199,15 @@ function questionFor(match: Pick<MatchRow, 'match_type' | 'difference_cents' | '
 
 /** Aviso interno a quem pode aprovar. Com quatro olhos, quem propôs não é avisado. */
 async function notifyApprovers(dc: DecisionContext, matchId: string, summary: string): Promise<void> {
-  await dc.db.query(
-    `INSERT INTO notifications (tenant_id, user_id, event, title, body, link)
-     SELECT u.tenant_id, u.id, 'approval.requested', 'Conciliação aguardando aprovação', $2, $3
-       FROM users u
-       JOIN roles r ON r.tenant_id = u.tenant_id AND r.id = u.role_id
-      WHERE u.tenant_id = $1 AND u.status = 'active' AND 'reconciliation.approve' = ANY (r.permissions)
-        AND ($4::uuid IS NULL OR u.id <> $4::uuid)`,
-    [dc.tenantId, summary, `/aprovacoes?match=${matchId}`, dc.approvals.fourEyes ? dc.userId : null],
-  );
+  await emitNotification(dc.db, {
+    tenantId: dc.tenantId,
+    event: 'approval.requested',
+    title: 'Conciliação aguardando aprovação',
+    body: summary,
+    link: `/aprovacoes?match=${matchId}`,
+    data: { matchId, proposedBy: dc.userId },
+    defaultRecipients: { permission: 'reconciliation.approve', excludeUserId: dc.approvals.fourEyes ? dc.userId : null },
+  });
 }
 
 /** Confirma a conciliação: itens reservados passam a conciliados (ou ignorados, para o tipo `ignored`). */
