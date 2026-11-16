@@ -1,11 +1,12 @@
 import { DEFAULT_TENANT_SETTINGS } from '@concilia/core';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { writeAudit, type AuditActor } from '../../audit/audit';
 import { withContext, type Db } from '../../db/context';
 import type { AppDeps } from '../../deps';
 import { AppError, badRequest, forbidden, notFound } from '../../http/errors';
-import { noContent, route, SESSION_COOKIE, type RouteDefinition } from '../../http/route';
+import type { AuthContext } from '../../http/auth';
+import { noContent, route, SESSION_COOKIE, type AuditInput, type RouteDefinition, type StatusResponse } from '../../http/route';
 import { hashPassword, passwordProblem, verifyPassword } from '../../security/password';
 import { csrfTokenFor, generateToken, sha256 } from '../../security/tokens';
 import { getTenantSettings } from '../settings/service';
@@ -29,6 +30,28 @@ interface LoginUserRow {
   failed_logins: number;
   locked_until: Date | null;
   tenant_status: string | null;
+  password_changed_at: Date;
+}
+
+/** Validade da senha temporária (criação ou redefinição pelo administrador). */
+export const TEMPORARY_PASSWORD_HOURS = 72;
+
+/** Fim da espera do par usuário + origem, ou nulo. */
+async function blockedUntil(deps: AppDeps, userId: string, source: string): Promise<Date | null> {
+  const result = await deps.pool.query<{ until: Date | null }>('SELECT auth_login_blocked_until($1, $2) AS until', [
+    userId,
+    source,
+  ]);
+  return result.rows[0]?.until ?? null;
+}
+
+function throttled(until: Date): AppError {
+  const seconds = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 1000));
+  return new AppError(
+    429,
+    'login_throttled',
+    `Muitas tentativas sem sucesso a partir desta origem. Aguarde ${seconds} segundo(s) e tente de novo.`,
+  );
 }
 
 /** Corpo de /auth/me (e da resposta do login). */
@@ -132,6 +155,50 @@ const passwordBody = z.object({
 
 const sessionParams = z.object({ id: z.uuid() });
 
+function loginRateKey(req: FastifyRequest): string {
+  const email = (req.body as { email?: unknown } | undefined)?.email;
+  return `login|${req.ip}|${typeof email === 'string' ? email.trim().toLowerCase().slice(0, 254) : ''}`;
+}
+
+/** Grava a senha nova depois de conferida a atual; encerra as outras sessões. */
+async function changePassword(
+  db: Db,
+  deps: AppDeps,
+  auth: AuthContext,
+  body: z.infer<typeof passwordBody>,
+  current: { email: string },
+  audit: (entry: AuditInput) => Promise<void>,
+): Promise<StatusResponse> {
+  const minLength = auth.tenantId
+    ? (await getTenantSettings(db, auth.tenantId)).settings.security.passwordMinLength
+    : PLATFORM_PASSWORD_MIN_LENGTH;
+  const problem = passwordProblem(body.newPassword, { minLength }, current.email);
+  if (problem) throw badRequest(problem, 'weak_password');
+  if (body.newPassword === body.currentPassword) {
+    throw badRequest('A nova senha deve ser diferente da atual.', 'weak_password');
+  }
+
+  await db.query(
+    `UPDATE users
+        SET password_hash = $2, must_change_password = false, password_changed_at = now()
+      WHERE id = $1`,
+    [auth.userId, await hashPassword(body.newPassword, deps.config.passwordScryptCost)],
+  );
+  const revoked = await db.query(
+    `UPDATE sessions SET revoked_at = now(), revoked_reason = 'password_changed'
+      WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`,
+    [auth.userId, auth.sessionId],
+  );
+  await audit({
+    action: 'auth.password_changed',
+    entityType: 'user',
+    entityId: auth.userId,
+    summary: `${current.email} trocou a senha`,
+    metadata: { revokedSessions: revoked.rowCount ?? 0 },
+  });
+  return noContent();
+}
+
 export const routes: RouteDefinition[] = [
   route({
     method: 'POST',
@@ -140,7 +207,8 @@ export const routes: RouteDefinition[] = [
     tags: ['autenticação'],
     auth: 'public',
     body: loginBody,
-    rateLimit: { max: 10, timeWindow: '1 minute' },
+    // Por origem e e-mail: tentativas contra uma conta não barram o login de outras pessoas do mesmo IP.
+    rateLimit: { max: 10, timeWindow: '1 minute', key: loginRateKey },
     handler: async ({ body, req, reply, deps }) => {
       const email = body.email.trim().toLowerCase();
       const found = await deps.pool.query<LoginUserRow>('SELECT * FROM auth_find_user($1)', [email]);
@@ -168,15 +236,14 @@ export const routes: RouteDefinition[] = [
         });
 
       const passwordOk = await verifyPassword(body.password, user.password_hash);
-      if (user.locked_until && user.locked_until.getTime() > Date.now()) {
-        await withContext(deps.pool, context, (db) => auditFailure(db, 'account_locked'));
+      // Espera por conta e origem: falhas de um endereço não impedem o titular de entrar de outro.
+      const until = await blockedUntil(deps, user.id, req.ip);
+      if (until) {
         if (passwordOk) {
+          // Só quem acerta a senha fica sabendo da espera; a trilha registra uma vez por tentativa certa.
+          await withContext(deps.pool, context, (db) => auditFailure(db, 'throttled'));
           deps.metrics.loginAttempts.inc({ result: 'locked' });
-          throw new AppError(
-            423,
-            'account_locked',
-            'Conta bloqueada temporariamente após tentativas sem sucesso. Tente novamente mais tarde.',
-          );
+          throw throttled(until);
         }
         deps.metrics.loginAttempts.inc({ result: 'invalid' });
         throw invalidCredentials();
@@ -184,8 +251,9 @@ export const routes: RouteDefinition[] = [
 
       if (!passwordOk) {
         await withContext(deps.pool, context, async (db) => {
-          await db.query('SELECT auth_register_login_failure($1, $2, $3)', [
+          await db.query('SELECT auth_register_login_failure($1, $2, $3, $4)', [
             user.id,
+            req.ip,
             deps.config.loginMaxAttempts,
             deps.config.loginLockMinutes,
           ]);
@@ -203,10 +271,20 @@ export const routes: RouteDefinition[] = [
         deps.metrics.loginAttempts.inc({ result: 'disabled' });
         throw forbidden('A empresa não está disponível.', 'tenant_unavailable');
       }
+      if (
+        user.must_change_password &&
+        Date.now() - user.password_changed_at.getTime() > TEMPORARY_PASSWORD_HOURS * 3_600_000
+      ) {
+        deps.metrics.loginAttempts.inc({ result: 'disabled' });
+        throw forbidden(
+          `A senha temporária venceu (vale ${TEMPORARY_PASSWORD_HOURS} horas). Peça ao administrador uma nova.`,
+          'temporary_password_expired',
+        );
+      }
 
       const token = generateToken();
       const me = await withContext(deps.pool, context, async (db) => {
-        await db.query('SELECT auth_register_login_success($1)', [user.id]);
+        await db.query('SELECT auth_register_login_success($1, $2)', [user.id, req.ip]);
         const idleMinutes = user.tenant_id
           ? (await getTenantSettings(db, user.tenant_id)).settings.security.sessionIdleMinutes
           : PLATFORM_IDLE_MINUTES;
@@ -291,46 +369,41 @@ export const routes: RouteDefinition[] = [
     write: false,
     allowPendingPasswordChange: true,
     body: passwordBody,
-    handler: async ({ db, auth, body, deps, audit }) => {
-      const row = await db.query<{ password_hash: string; email: string }>(
-        'SELECT password_hash, email FROM users WHERE id = $1',
-        [auth.userId],
-      );
-      const current = row.rows[0];
+    rateLimit: { max: 10, timeWindow: '1 minute' },
+    // A falha precisa ficar gravada mesmo com a recusa: transações curtas em vez de uma só.
+    transaction: 'steps',
+    handler: async ({ auth, body, deps, req, transaction }) => {
+      const userId = auth.userId as string;
+      const until = await blockedUntil(deps, userId, req.ip);
+      if (until) throw throttled(until);
+      const current = await transaction(async ({ db }) => {
+        const row = await db.query<{ password_hash: string; email: string }>(
+          'SELECT password_hash, email FROM users WHERE id = $1',
+          [userId],
+        );
+        return row.rows[0];
+      });
       if (!current || !(await verifyPassword(body.currentPassword, current.password_hash))) {
+        // Conta como falha da origem, como no login: quem tem uma sessão roubada não testa senhas à vontade.
+        await transaction(async ({ db, audit }) => {
+          await db.query('SELECT auth_register_login_failure($1, $2, $3, $4)', [
+            userId,
+            req.ip,
+            deps.config.loginMaxAttempts,
+            deps.config.loginLockMinutes,
+          ]);
+          await audit({
+            action: 'auth.password_change_failed',
+            entityType: 'user',
+            entityId: userId,
+            summary: 'Troca de senha recusada: senha atual não confere',
+          });
+        });
         throw badRequest('A senha atual não confere.', 'invalid_password');
       }
-      const minLength = auth.tenantId
-        ? (await getTenantSettings(db, auth.tenantId)).settings.security.passwordMinLength
-        : PLATFORM_PASSWORD_MIN_LENGTH;
-      const problem = passwordProblem(body.newPassword, { minLength }, current.email);
-      if (problem) throw badRequest(problem, 'weak_password');
-      if (body.newPassword === body.currentPassword) {
-        throw badRequest('A nova senha deve ser diferente da atual.', 'weak_password');
-      }
-
-      await db.query(
-        `UPDATE users
-            SET password_hash = $2, must_change_password = false, password_changed_at = now()
-          WHERE id = $1`,
-        [auth.userId, await hashPassword(body.newPassword, deps.config.passwordScryptCost)],
-      );
-      const revoked = await db.query(
-        `UPDATE sessions SET revoked_at = now(), revoked_reason = 'password_changed'
-          WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`,
-        [auth.userId, auth.sessionId],
-      );
-      await audit({
-        action: 'auth.password_changed',
-        entityType: 'user',
-        entityId: auth.userId,
-        summary: `${current.email} trocou a senha`,
-        metadata: { revokedSessions: revoked.rowCount ?? 0 },
-      });
-      return noContent();
+      return transaction(({ db, audit }) => changePassword(db, deps, auth, body, current, audit));
     },
   }),
-
   route({
     method: 'GET',
     url: '/auth/sessions',

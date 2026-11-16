@@ -248,14 +248,15 @@ Valores padrão e intervalos vêm de `apps/api/src/config/env.ts`. A coluna "No 
 | `DB_POOL_MAX` | `10` | 1 a 100 | Conexões máximas no pool. | sim |
 | `SESSION_SECRET` | obrigatória | mínimo 32 caracteres | Segredo do token CSRF das sessões (HMAC). | sim |
 | `SECRETS_MASTER_KEY` | obrigatória | 32 bytes em base64 | Chave mestra para cifrar segredos. Ver a nota abaixo. | sim |
-| `SECRETS_KEY_VERSION` | `1` | 1 a 1000 | Versão da chave mestra. Ver a nota abaixo. | sim |
+| `SECRETS_KEY_VERSION` | `1` | 1 a 255 | Versão da chave mestra. Ver a nota abaixo. | sim |
+| `SECRETS_PREVIOUS_MASTER_KEY`, `SECRETS_PREVIOUS_KEY_VERSION` | vazio | 32 bytes em base64; 1 a 255 | Chave anterior, só durante a troca da chave mestra (`docs/09-seguranca-lgpd.md`, seção 7). | sim |
 | `COOKIE_SECURE` | `true` | `true` ou `false` | Cookie só por HTTPS. Obrigatório `true` em produção. | sim, com `false` |
 | `SESSION_ABSOLUTE_HOURS` | `12` | 1 a 720 | Validade máxima da sessão, em horas. | sim |
-| `LOGIN_MAX_ATTEMPTS` | `5` | 3 a 20 | Tentativas erradas antes do bloqueio temporário. | sim |
-| `LOGIN_LOCK_MINUTES` | `15` | 1 a 1440 | Duração do bloqueio, em minutos. | sim |
+| `LOGIN_MAX_ATTEMPTS` | `5` | 3 a 20 | Tentativas erradas, por conta e origem (IP), antes de a origem passar a esperar 30 s, que dobram a cada nova falha. Outras origens não são afetadas. | sim |
+| `LOGIN_LOCK_MINUTES` | `15` | 1 a 1440 | Teto da espera de uma origem, em minutos. | sim |
 | `PASSWORD_SCRYPT_COST` | `17` | 10 a 20 (log2 do custo) | Custo do scrypt. Em produção, 15 ou mais. | sim |
 | `RATE_LIMIT_ENABLED` | `true` | `true` ou `false` | Limite de requisições por IP. Use `false` só para depuração. | sim |
-| `TRUST_PROXY` | `false` | `true` ou `false` | Confia nos cabeçalhos `X-Forwarded-*` de um proxy reverso. | sim |
+| `TRUST_PROXY` | `false` | `false`, número de proxies (1 a 10) ou lista de redes (`10.0.0.0/8,127.0.0.1`) | Proxies cujo `X-Forwarded-For` é aceito; o IP do cliente vem do primeiro salto não confiável. `true` é recusado (permitiria forjar o IP). **Obrigatório definir em produção.** O proxy precisa acrescentar o IP de quem conectou ao `X-Forwarded-For`. | sim |
 | `WORKER_ENABLED` | `true` | `true` ou `false` | Executa os trabalhos da fila dentro do processo da API. | sim |
 | `WORKER_POLL_MS` | `1000` | 100 a 60000 | Intervalo entre consultas da fila, em milissegundos. | sim |
 | `WORKER_CONCURRENCY` | `2` | 1 a 16 | Trabalhos executados em paralelo. | sim |
@@ -263,7 +264,7 @@ Valores padrão e intervalos vêm de `apps/api/src/config/env.ts`. A coluna "No 
 | `MAX_UPLOAD_MB` | `15` | 1 a 100 | Tamanho máximo de um arquivo enviado, em MB. | sim |
 | `MAX_IMPORT_ROWS` | `100000` | 100 a 500000 | Linhas máximas aceitas em uma importação. | sim |
 | `ALLOW_PRIVATE_INTEGRATION_HOSTS` | `false` | `true` ou `false` | Permite integrações com endereços privados. Recusado em produção. | sim |
-| `METRICS_TOKEN` | vazio | texto | Se definido, `/metrics` exige `Authorization: Bearer <token>`. | sim |
+| `METRICS_TOKEN` | vazio | texto | `/metrics` exige `Authorization: Bearer <token>`. Obrigatório em produção, com 16 caracteres ou mais. | sim |
 | `WEB_DIST_DIR` | vazio | caminho | Pasta com o build do front-end servido pela API. Vazio desliga. | sim |
 
 Variáveis lidas fora de `env.ts`:

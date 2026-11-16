@@ -16,6 +16,8 @@ export interface RotateSecretsOptions {
   currentKey: Buffer;
   newKey: Buffer;
   newVersion: number;
+  /** Chaves de versões anteriores ainda presentes (ex.: segredo gravado durante a troca anterior). */
+  previousKeys?: { version: number; key: Buffer }[];
   log?: (line: string) => void;
 }
 
@@ -64,7 +66,8 @@ export async function rotateSecrets(options: RotateSecretsOptions): Promise<Rota
   if (!Number.isInteger(options.newVersion) || options.newVersion < 1 || options.newVersion > 255) {
     throw new SecretsRotationError('NEW_SECRETS_KEY_VERSION deve ser um inteiro entre 1 e 255.');
   }
-  if (options.currentKey.equals(options.newKey)) {
+  // Com a chave anterior informada, a mesma chave é aceita: a passada só recifra o que ficou na versão anterior.
+  if (options.currentKey.equals(options.newKey) && (options.previousKeys ?? []).length === 0) {
     throw new SecretsRotationError('A chave nova é igual à atual.');
   }
 
@@ -87,7 +90,10 @@ export async function rotateSecrets(options: RotateSecretsOptions): Promise<Rota
         else skipped += 1;
         continue;
       }
-      const plaintext = tryDecrypt(options.currentKey, row);
+      // A versão gravada no texto escolhe a chave; sem chave anterior daquela versão, usa a atual.
+      const version = secretKeyVersion(row.secret_ciphertext);
+      const previous = options.previousKeys?.find((item) => item.version === version);
+      const plaintext = tryDecrypt(previous?.key ?? options.currentKey, row);
       if (plaintext === null) {
         unreadable.push(row.id);
         continue;

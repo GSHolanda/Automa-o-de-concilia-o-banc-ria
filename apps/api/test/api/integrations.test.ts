@@ -326,3 +326,229 @@ describe('conector REST contra servidor HTTP local de teste', () => {
     expect(inverted.status).toBe(400);
   });
 });
+
+/** Espera a condição ficar verdadeira (sem prender o laço de eventos). */
+async function waitUntil(condition: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const started = Date.now();
+  while (!condition()) {
+    if (Date.now() - started > timeoutMs) throw new Error('Condição não atingida no tempo limite');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** Resolve com a resposta ou com `null` se demorar mais que o limite. */
+function within<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([promise, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))]);
+}
+
+describe('revisão de segurança: chamada externa fora da transação (achado 4)', () => {
+  let small: FastifyInstance;
+  let slow: LocalTestServer;
+  let release: () => void = () => undefined;
+
+  beforeAll(async () => {
+    // Uma conexão só: se a chamada externa prendesse a transação, nenhuma outra requisição andaria.
+    small = await buildTestApp({ DB_POOL_MAX: '1' });
+    slow = await startLocalTestServer();
+  });
+  afterAll(async () => {
+    release();
+    await slow.close();
+    await small.close();
+  });
+
+  function holdResponses(body: unknown): void {
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    slow.respond((_request, res) => {
+      void gate.then(() => json(res, 200, body));
+    });
+  }
+
+  async function slowConnector(): Promise<string> {
+    const created = await admin.post('/integrations', {
+      kind: 'rest_ledger',
+      name: `ERP lento ${Math.random().toString(16).slice(2, 8)}`,
+      config: { baseUrl: slow.url, authType: 'none', fieldMap: { date: 'd', amount: 'v', description: 'h' } },
+    });
+    expect(created.status).toBe(201);
+    return created.body.id as string;
+  }
+
+  it('POST /integrations/:id/test não ocupa conexão enquanto espera o serviço', async () => {
+    const id = await slowConnector();
+    const smallAdmin = await loggedIn(small, tenant.adminEmail);
+    const otherClient = await loggedIn(small, other.adminEmail);
+    holdResponses([]);
+    const before = slow.requests.length;
+    const pending = smallAdmin.post(`/integrations/${id}/test`);
+    try {
+      await waitUntil(() => slow.requests.length > before);
+      const me = await within(otherClient.get('/auth/me'), 3_000);
+      expect(me?.status).toBe(200);
+    } finally {
+      release();
+    }
+    const tested = await pending;
+    expect(tested.body.status).toBe('verified');
+  });
+
+  it('trabalho connector.pull não ocupa conexão enquanto espera o serviço', async () => {
+    const id = await slowConnector();
+    const otherClient = await loggedIn(small, other.adminEmail);
+    const pulled = await admin.post(`/integrations/${id}/pull`, { dateFrom: '2024-06-01', dateTo: '2024-06-30' });
+    expect(pulled.status).toBe(202);
+    holdResponses([{ d: '2024-06-10', v: '10.00', h: 'Item lento fictício' }]);
+    const before = slow.requests.length;
+    const draining = drainJobs(small);
+    try {
+      await waitUntil(() => slow.requests.length > before);
+      const me = await within(otherClient.get('/auth/me'), 3_000);
+      expect(me?.status).toBe(200);
+    } finally {
+      release();
+    }
+    await draining;
+    const job = await admin.get(`/jobs/${pulled.body.jobId}`);
+    expect(job.body.status).toBe('succeeded');
+    const row = await ownerPool().query('SELECT status FROM integrations WHERE id = $1', [id]);
+    expect(row.rows[0].status).toBe('verified');
+  });
+
+  it('alteração da integração durante o teste não deixa o resultado antigo marcar verified', async () => {
+    const id = await slowConnector();
+    holdResponses([]);
+    const before = slow.requests.length;
+    const pending = admin.post(`/integrations/${id}/test`);
+    try {
+      await waitUntil(() => slow.requests.length > before);
+      const changed = await admin.patch(`/integrations/${id}`, {
+        config: { baseUrl: slow.url, path: '/outra', authType: 'none', fieldMap: { date: 'd', amount: 'v', description: 'h' } },
+      });
+      expect(changed.status).toBe(200);
+    } finally {
+      release();
+    }
+    const tested = await pending;
+    expect(tested.status).toBe(409);
+    expect(tested.body.error.code).toBe('integration_changed');
+    const row = await ownerPool().query('SELECT status FROM integrations WHERE id = $1', [id]);
+    expect(row.rows[0].status).toBe('configured');
+  });
+});
+
+describe('revisão de segurança: destino e credenciais da integração', () => {
+  const PATH_TOKEN = 'TOKEN-NO-CAMINHO-ficticio-77aa';
+  const QUERY_TOKEN = 'TOKEN-NA-CONSULTA-ficticio-88bb';
+  const fieldMap = { date: 'd', amount: 'v', description: 'h' };
+  let other: LocalTestServer;
+
+  beforeAll(async () => {
+    other = await startLocalTestServer();
+  });
+  afterAll(async () => {
+    await other.close();
+  });
+
+  it('achado 3: mudar o endereço do conector sem informar o segredo é recusado; nada vai ao destino novo', async () => {
+    const created = await admin.post('/integrations', {
+      kind: 'rest_ledger',
+      name: 'ERP com destino trocado',
+      config: { baseUrl: erp.url, authType: 'bearer', fieldMap },
+      secret: REST_SECRET,
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.id as string;
+
+    const moved = await admin.patch(`/integrations/${id}`, { config: { baseUrl: other.url, authType: 'bearer', fieldMap } });
+    expect(moved.status).toBe(400);
+    expect(moved.body.error.code).toBe('secret_required');
+    const kept = await ownerPool().query('SELECT config FROM integrations WHERE id = $1', [id]);
+    expect(kept.rows[0].config.baseUrl).toBe(erp.url);
+
+    // Trocar o tipo de autenticação também é mudança de destino.
+    const header = await admin.patch(`/integrations/${id}`, {
+      config: { baseUrl: erp.url, authType: 'header', headerName: 'x-api-key', fieldMap },
+    });
+    expect(header.body.error?.code).toBe('secret_required');
+
+    // Apagar o segredo junto com a troca é aceito, e o teste não envia credencial alguma.
+    const cleared = await admin.patch(`/integrations/${id}`, {
+      config: { baseUrl: other.url, authType: 'bearer', fieldMap },
+      secret: null,
+    });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body).toMatchObject({ hasSecret: false, status: 'not_configured' });
+    const tested = await admin.post(`/integrations/${id}/test`);
+    expect(tested.body.status).toBe('error');
+    expect(other.requests.some((request) => String(request.headers.authorization ?? '').includes(REST_SECRET))).toBe(false);
+
+    // Com o segredo informado de novo, a troca é aceita.
+    other.respond((_request, res) => json(res, 200, []));
+    const renewed = await admin.patch(`/integrations/${id}`, { secret: 'token-novo-ficticio-para-b' });
+    expect(renewed.body).toMatchObject({ hasSecret: true, status: 'configured' });
+    expect((await admin.post(`/integrations/${id}/test`)).body.status).toBe('verified');
+    expect(other.requests.at(-1)!.headers.authorization).toBe('Bearer token-novo-ficticio-para-b');
+    // Mudança que não toca o destino (caminho) continua sem exigir o segredo.
+    const pathOnly = await admin.patch(`/integrations/${id}`, {
+      config: { baseUrl: other.url, path: '/outro', authType: 'bearer', fieldMap },
+    });
+    expect(pathOnly.status).toBe(200);
+  });
+
+  it('achado 3: trocar baseURL do provedor de IA exige a chave de novo', async () => {
+    expect((await admin.put('/modules/ai.assist', { enabled: true })).status).toBe(200);
+    const created = await admin.post('/integrations', {
+      kind: 'ai_provider',
+      name: 'IA de teste',
+      config: { provider: 'anthropic', baseURL: erp.url },
+      secret: 'chave-ia-ficticia-3c4d',
+    });
+    expect(created.status).toBe(201);
+    const moved = await admin.patch(`/integrations/${created.body.id}`, { config: { provider: 'anthropic', baseURL: other.url } });
+    expect(moved.status).toBe(400);
+    expect(moved.body.error.code).toBe('secret_required');
+    const model = await admin.patch(`/integrations/${created.body.id}`, {
+      config: { provider: 'anthropic', baseURL: erp.url, model: 'outro-modelo' },
+    });
+    expect(model.status).toBe(200);
+  });
+
+  it('achado 7: usuário e senha no endereço são recusados', async () => {
+    const url = new URL(hook.url);
+    const refused = await admin.post('/integrations', {
+      kind: 'webhook',
+      name: 'Com credencial no endereço',
+      config: { url: `http://usuario:SENHA-BASICA@${url.host}/gancho` },
+      secret: WEBHOOK_SECRET,
+    });
+    expect(refused.status).toBe(400);
+    expect(refused.raw.toString()).not.toContain('SENHA-BASICA');
+  });
+
+  it('achado 7: caminho e consulta do endereço não vão para a auditoria; quem gerencia vê o endereço completo', async () => {
+    const full = `${hook.url}/services/${PATH_TOKEN}?apikey=${QUERY_TOKEN}`;
+    const created = await admin.post('/integrations', { kind: 'webhook', name: 'Gancho com token', config: { url: full }, secret: WEBHOOK_SECRET });
+    expect(created.status).toBe(201);
+    expect(created.body.config.url).toBe(full);
+    const id = created.body.id as string;
+    await admin.patch(`/integrations/${id}`, { name: 'Gancho com token renomeado' });
+    await admin.delete(`/integrations/${id}`);
+
+    const auditor = await userWithRole(app, admin, 'auditor');
+    const trail = await auditor.get(`/audit?entityId=${id}`);
+    expect(trail.status).toBe(200);
+    expect(trail.body.items.length).toBeGreaterThanOrEqual(3);
+    for (const token of [PATH_TOKEN, QUERY_TOKEN]) {
+      expect(trail.raw.toString()).not.toContain(token);
+      const stored = await ownerPool().query(
+        `SELECT count(*)::int AS total FROM audit_log WHERE summary LIKE $1 OR before::text LIKE $1 OR after::text LIKE $1 OR metadata::text LIKE $1`,
+        [`%${token}%`],
+      );
+      expect(stored.rows[0].total).toBe(0);
+    }
+    const after = trail.body.items.find((item: { action: string }) => item.action === 'integration.created').after;
+    expect(after.config.url).toBe(`${hook.url}/…`);
+  });
+});

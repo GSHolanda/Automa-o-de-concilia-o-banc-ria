@@ -21,7 +21,29 @@ const httpUrl = z
   .trim()
   .max(2_000)
   .url('Endereço inválido')
-  .refine((value) => /^https?:\/\//i.test(value), 'Use um endereço http(s)');
+  .refine((value) => /^https?:\/\//i.test(value), 'Use um endereço http(s)')
+  // Credencial no endereço apareceria na visão e na trilha: use o campo de segredo.
+  .refine((value) => !hasUserInfo(value), 'Não inclua usuário ou senha no endereço; use o campo de segredo');
+
+function hasUserInfo(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.username !== '' || url.password !== '';
+  } catch {
+    return false;
+  }
+}
+
+/** Endereço reduzido a esquema, host e porta; caminho e consulta (que podem ser credencial) viram "…". */
+export function maskUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    const hasRest = (url.pathname !== '' && url.pathname !== '/') || url.search !== '' || url.hash !== '';
+    return `${url.protocol}//${url.host}${hasRest ? '/…' : ''}`;
+  } catch {
+    return '[endereço inválido]';
+  }
+}
 
 export const webhookConfigSchema = z.object({ url: httpUrl }).strict();
 
@@ -92,4 +114,19 @@ export function integrationNeedsSecret(kind: IntegrationKind, config: unknown): 
   if (kind === 'webhook' || kind === 'ai_provider') return true;
   if (kind === 'rest_ledger') return (config as RestLedgerConfig | null)?.authType !== 'none';
   return !!(config as SmtpConfig | null)?.user;
+}
+
+/** Campos que definem para onde ou como o segredo é enviado (achado 3 da revisão de segurança). */
+export const INTEGRATION_DESTINATION_FIELDS: Readonly<Record<IntegrationKind, readonly string[]>> = {
+  webhook: ['url'],
+  smtp: ['host', 'port', 'secure'],
+  rest_ledger: ['baseUrl', 'authType', 'headerName'],
+  ai_provider: ['provider', 'baseURL'],
+};
+
+/** A nova configuração muda o destino do segredo guardado: o segredo precisa ser informado de novo. */
+export function integrationDestinationChanged(kind: IntegrationKind, before: unknown, after: unknown): boolean {
+  const previous = (before ?? {}) as Record<string, unknown>;
+  const next = (after ?? {}) as Record<string, unknown>;
+  return INTEGRATION_DESTINATION_FIELDS[kind].some((field) => (previous[field] ?? null) !== (next[field] ?? null));
 }

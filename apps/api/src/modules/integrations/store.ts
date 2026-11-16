@@ -2,6 +2,7 @@ import {
   INTEGRATION_MODULES,
   integrationConfigSchemas,
   integrationNeedsSecret,
+  maskUrl,
   type AiProviderConfig,
   type IntegrationKind,
   type IntegrationStatus,
@@ -17,10 +18,13 @@ import { createAnthropicProvider } from '../../integrations/anthropic';
 import { createRestLedgerConnector } from '../../integrations/rest-ledger';
 import { verifySmtp } from '../../integrations/smtp';
 import { sendWebhook } from '../../integrations/webhook';
-import { decryptSecret, encryptSecret, scrubSecret } from '../../security/secrets';
+import { decryptWithMasterKeys, encryptSecret, scrubSecret } from '../../security/secrets';
 import type { Entitlements } from '../tenancy/entitlements';
 
-export type SecretConfig = Pick<Config, 'secretsMasterKey' | 'secretsKeyVersion' | 'allowPrivateIntegrationHosts'>;
+export type SecretConfig = Pick<
+  Config,
+  'secretsMasterKey' | 'secretsKeyVersion' | 'secretsPreviousKey' | 'allowPrivateIntegrationHosts'
+>;
 
 export interface IntegrationRow {
   id: string;
@@ -58,6 +62,19 @@ export function integrationView(row: IntegrationRow, modules?: readonly string[]
   };
 }
 
+/** Campos de endereço: caminho e consulta podem ser a própria credencial (token de webhook). */
+const URL_FIELDS = ['url', 'baseUrl', 'baseURL'] as const;
+
+/** Visão para a trilha de auditoria: endereços reduzidos a esquema, host e porta. */
+export function integrationAuditView(row: IntegrationRow, modules?: readonly string[]) {
+  const view = integrationView(row, modules);
+  const config: Record<string, unknown> = { ...view.config };
+  for (const field of URL_FIELDS) {
+    if (typeof config[field] === 'string') config[field] = maskUrl(config[field]);
+  }
+  return { ...view, config };
+}
+
 export const ERROR_LIMIT = 1_000;
 
 export async function findIntegration(db: Db, tenantId: string, id: string, forUpdate = false): Promise<IntegrationRow> {
@@ -85,10 +102,14 @@ export function sealSecret(config: SecretConfig, tenantId: string, integrationId
   return encryptSecret(config.secretsMasterKey, config.secretsKeyVersion, { tenantId, integrationId }, secret);
 }
 
-/** Decifra no contexto da empresa e da integração; texto de outra empresa não decifra. */
+/** Decifra no contexto da empresa e da integração; texto de outra empresa não decifra. Aceita a chave anterior. */
 export function readSecret(config: SecretConfig, row: IntegrationRow): string | null {
   if (!row.secret_ciphertext) return null;
-  return decryptSecret(config.secretsMasterKey, { tenantId: row.tenant_id, integrationId: row.id }, row.secret_ciphertext);
+  return decryptWithMasterKeys(
+    { current: config.secretsMasterKey, previous: config.secretsPreviousKey },
+    { tenantId: row.tenant_id, integrationId: row.id },
+    row.secret_ciphertext,
+  );
 }
 
 /** Situação sem chamada externa: `verified` nunca é atribuída aqui. */
@@ -146,12 +167,16 @@ export async function checkIntegration(config: SecretConfig, row: IntegrationRow
   }
 }
 
-/** Grava o resultado de uma chamada real: `verified` só com sucesso; falha vira `error` com mensagem. */
-export async function recordCheck(db: Db, row: IntegrationRow, error: string | null): Promise<IntegrationRow> {
+/**
+ * Grava o resultado de uma chamada real: `verified` só com sucesso; falha vira `error` com mensagem.
+ * Só vale para a configuração e o segredo que foram testados: se mudaram durante a chamada, devolve nulo.
+ */
+export async function recordCheck(db: Db, row: IntegrationRow, error: string | null): Promise<IntegrationRow | null> {
   const result = await db.query<IntegrationRow>(
     `UPDATE integrations SET status = $3, last_error = $4, last_checked_at = now()
-      WHERE tenant_id = $1 AND id = $2 RETURNING *`,
-    [row.tenant_id, row.id, error === null ? 'verified' : 'error', error],
+      WHERE tenant_id = $1 AND id = $2 AND config = $5::jsonb AND secret_ciphertext IS NOT DISTINCT FROM $6::bytea
+      RETURNING *`,
+    [row.tenant_id, row.id, error === null ? 'verified' : 'error', error, JSON.stringify(row.config), row.secret_ciphertext],
   );
-  return result.rows[0] ?? row;
+  return result.rows[0] ?? null;
 }

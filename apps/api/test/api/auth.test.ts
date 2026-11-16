@@ -16,6 +16,11 @@ afterAll(async () => {
   await closePools();
 });
 
+/** Login vindo de um endereço de origem específico (sem proxy à frente). */
+function loginFrom(target: FastifyInstance, ip: string, email: string, password: string, headers: Record<string, string> = {}) {
+  return target.inject({ method: 'POST', url: '/api/v1/auth/login', remoteAddress: ip, headers, payload: { email, password } });
+}
+
 describe('login', () => {
   it('autentica, devolve o contexto do usuário e grava cookie HttpOnly', async () => {
     const client = new ApiClient(app);
@@ -49,15 +54,72 @@ describe('login', () => {
     expect(wrong.body.error.code).toBe('invalid_credentials');
   });
 
-  it('bloqueia a conta após falhas sucessivas, mesmo com a senha correta', async () => {
+  it('achado 5: falhas de uma origem atrasam só essa origem; o titular entra de outra', async () => {
     const other = await createTenant();
-    for (let i = 0; i < 5; i += 1) await new ApiClient(app).login(other.adminEmail, 'senha-errada-000');
-    const locked = await new ApiClient(app).login(other.adminEmail, other.adminPassword);
-    expect(locked.status).toBe(423);
-    expect(locked.body.error.code).toBe('account_locked');
+    const attacker = '203.0.113.10';
+    for (let i = 0; i < 6; i += 1) {
+      expect((await loginFrom(app, attacker, other.adminEmail, 'senha-errada-000')).statusCode).toBe(401);
+    }
+    // Da origem das falhas, mesmo a senha certa espera.
+    const throttled = await loginFrom(app, attacker, other.adminEmail, other.adminPassword);
+    expect(throttled.statusCode).toBe(429);
+    expect(throttled.json().error.code).toBe('login_throttled');
+    // O titular, de outra origem, entra normalmente.
+    expect((await loginFrom(app, '203.0.113.20', other.adminEmail, other.adminPassword)).statusCode).toBe(200);
+    // Durante a espera, tentativas não geram registro novo na trilha: 5 falhas + 1 aviso de espera.
+    const failures = await ownerPool().query(
+      `SELECT count(*)::int AS total FROM audit_log WHERE tenant_id = $1 AND action = 'auth.login_failed'`,
+      [other.tenantId],
+    );
+    expect(failures.rows[0].total).toBe(6);
+    // Terminada a espera, a origem volta a entrar.
+    await ownerPool().query(`UPDATE login_throttle SET blocked_until = now() - interval '1 second' WHERE user_id = $1`, [
+      other.adminUserId,
+    ]);
+    expect((await loginFrom(app, attacker, other.adminEmail, other.adminPassword)).statusCode).toBe(200);
+  });
 
-    await ownerPool().query(`UPDATE users SET locked_until = now() - interval '1 minute' WHERE lower(email) = $1`, [other.adminEmail]);
-    expect((await new ApiClient(app).login(other.adminEmail, other.adminPassword)).status).toBe(200);
+  it('achado 5: a espera cresce a cada falha depois do limite, até o teto', async () => {
+    const other = await createTenant();
+    const source = '203.0.113.30';
+    const until = async () =>
+      (await ownerPool().query('SELECT blocked_until, now() AS now FROM login_throttle WHERE user_id = $1 AND source = $2', [
+        other.adminUserId,
+        source,
+      ])).rows[0];
+    for (let i = 0; i < 5; i += 1) await loginFrom(app, source, other.adminEmail, 'senha-errada-000');
+    const first = await until();
+    const firstWait = first.blocked_until.getTime() - first.now.getTime();
+    expect(firstWait).toBeGreaterThan(20_000);
+    expect(firstWait).toBeLessThanOrEqual(31_000);
+    for (let i = 0; i < 4; i += 1) {
+      await ownerPool().query('UPDATE login_throttle SET blocked_until = NULL WHERE user_id = $1', [other.adminUserId]);
+      await loginFrom(app, source, other.adminEmail, 'senha-errada-000');
+    }
+    const later = await until();
+    expect(later.blocked_until.getTime() - later.now.getTime()).toBeGreaterThan(400_000);
+    for (let i = 0; i < 4; i += 1) {
+      await ownerPool().query('UPDATE login_throttle SET blocked_until = NULL WHERE user_id = $1', [other.adminUserId]);
+      await loginFrom(app, source, other.adminEmail, 'senha-errada-000');
+    }
+    const capped = await until();
+    expect(capped.blocked_until.getTime() - capped.now.getTime()).toBeLessThanOrEqual(15 * 60_000 + 1_000);
+  });
+
+  it('achado 13: senha temporária vence em 72 horas', async () => {
+    const admin = await loggedIn(app, tenant.adminEmail);
+    const roles = await admin.get('/roles');
+    const roleId = roles.body.items.find((role: { key: string }) => role.key === 'analista').id;
+    const email = `temporaria-${Date.now()}@exemplo.test`;
+    const created = await admin.post('/users', { name: 'Pessoa Temporária', email, roleId });
+    expect(created.status).toBe(201);
+    const temporary = created.body.temporaryPassword as string;
+    await ownerPool().query(`UPDATE users SET password_changed_at = now() - interval '73 hours' WHERE id = $1`, [created.body.id]);
+    const expired = await new ApiClient(app).login(email, temporary);
+    expect(expired.status).toBe(403);
+    expect(expired.body.error.code).toBe('temporary_password_expired');
+    await ownerPool().query(`UPDATE users SET password_changed_at = now() - interval '71 hours' WHERE id = $1`, [created.body.id]);
+    expect((await new ApiClient(app).login(email, temporary)).status).toBe(200);
   });
 
   it('recusa usuário desativado e derruba as sessões que ele tinha', async () => {
@@ -71,6 +133,47 @@ describe('login', () => {
     const login = await new ApiClient(app).login(analyst.email, TEST_PASSWORD);
     expect(login.status).toBe(403);
     expect(login.body.error.code).toBe('account_disabled');
+  });
+});
+
+describe('achado 5: limite de login por origem e e-mail, com e sem proxy confiável', () => {
+  let limited: FastifyInstance;
+  let behindProxy: FastifyInstance;
+
+  beforeAll(async () => {
+    limited = await buildTestApp({ RATE_LIMIT_ENABLED: 'true' });
+    behindProxy = await buildTestApp({ RATE_LIMIT_ENABLED: 'true', TRUST_PROXY: '1' });
+  });
+  afterAll(async () => {
+    await limited.close();
+    await behindProxy.close();
+  });
+
+  it('sem proxy confiável, tentativas contra um e-mail não barram o login de outra pessoa pelo mesmo IP', async () => {
+    const victim = await createTenant();
+    const bystander = await createTenant();
+    const sharedIp = '10.9.8.7';
+    for (let i = 0; i < 10; i += 1) await loginFrom(limited, sharedIp, victim.adminEmail, 'senha-errada-000');
+    expect((await loginFrom(limited, sharedIp, victim.adminEmail, 'senha-errada-000')).statusCode).toBe(429);
+    expect((await loginFrom(limited, sharedIp, bystander.adminEmail, bystander.adminPassword)).statusCode).toBe(200);
+  });
+
+  it('com TRUST_PROXY=1, variar o X-Forwarded-For não escapa do limite e o IP forjado não vai para a trilha', async () => {
+    const victim = await createTenant();
+    const statuses: number[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      const response = await loginFrom(behindProxy, '10.0.0.5', victim.adminEmail, 'senha-errada-000', {
+        'x-forwarded-for': `198.51.100.${i + 1}, 203.0.113.50`,
+      });
+      statuses.push(response.statusCode);
+    }
+    expect(statuses.slice(0, 10).every((status) => status === 401)).toBe(true);
+    expect(statuses.slice(10)).toEqual([429, 429]);
+    const ips = await ownerPool().query(
+      `SELECT DISTINCT ip FROM audit_log WHERE tenant_id = $1 AND action = 'auth.login_failed'`,
+      [victim.tenantId],
+    );
+    expect(ips.rows.map((row) => row.ip)).toEqual(['203.0.113.50']);
   });
 });
 
@@ -153,6 +256,18 @@ describe('senha', () => {
     expect((await elsewhere.get('/auth/me')).status).toBe(401);
     expect((await new ApiClient(app).login(other.adminEmail, other.adminPassword)).status).toBe(401);
     expect((await new ApiClient(app).login(other.adminEmail, 'Nova-senha-forte-456')).status).toBe(200);
+  });
+
+  it('achado 13: senha atual errada conta como falha da origem e passa a esperar', async () => {
+    const other = await createTenant();
+    const current = await loggedIn(app, other.adminEmail);
+    for (let i = 0; i < 5; i += 1) {
+      const wrong = await current.post('/auth/password', { currentPassword: `errada-${i}-000`, newPassword: 'Nova-senha-forte-456' });
+      expect(wrong.status).toBe(400);
+    }
+    const blocked = await current.post('/auth/password', { currentPassword: other.adminPassword, newPassword: 'Nova-senha-forte-456' });
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error.code).toBe('login_throttled');
   });
 
   it('guarda a senha apenas como hash scrypt com sal', async () => {

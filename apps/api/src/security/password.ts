@@ -65,5 +65,54 @@ export function passwordProblem(password: string, policy: PasswordPolicy, email?
   if (local && local.length >= 4 && password.toLowerCase().includes(local)) {
     return 'A senha não pode conter o seu e-mail.';
   }
+  if (isCommonPassword(password)) {
+    return 'A senha é comum demais (palavra conhecida com números ou símbolos). Use uma frase ou combinação própria.';
+  }
   return null;
+}
+
+/** Palavras das senhas mais usadas; com números e símbolos em volta continuam fáceis de adivinhar. */
+const COMMON_WORDS = new Set([
+  '',
+  'senha',
+  'password',
+  'passw',
+  'pass',
+  'admin',
+  'administrador',
+  'qwerty',
+  'qwertyuiop',
+  'asdf',
+  'asdfgh',
+  'zxcvbn',
+  'qazwsx',
+  'abc',
+  'abcdef',
+  'abcdefgh',
+  'teste',
+  'test',
+  'brasil',
+  'mudar',
+  'mudarsenha',
+  'trocar',
+  'bemvindo',
+  'welcome',
+  'iloveyou',
+  'letmein',
+  'usuario',
+  'acesso',
+  'login',
+  'empresa',
+  'financeiro',
+  'concilia',
+]);
+
+/** A senha é só uma palavra comum (sem acentos, sem diferença de maiúsculas) cercada de números e símbolos. */
+function isCommonPassword(password: string): boolean {
+  const letters = password
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z]/g, '');
+  return COMMON_WORDS.has(letters);
 }

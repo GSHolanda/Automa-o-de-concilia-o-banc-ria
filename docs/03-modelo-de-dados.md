@@ -319,7 +319,8 @@ Estas funções rodam com os privilégios do dono do esquema. Todas têm `SET se
 | `set_updated_at()`, `_apply_tenant_rls()`, `tenants_guard()`, `source_record_immutable()` | Funções de trigger ou de criação de esquema. Não são `SECURITY DEFINER`. |
 | `audit_log_chain()` (trigger, 0001) | `SECURITY DEFINER`. Precisa ler a última linha da cadeia da empresa independentemente do contexto e obter o bloqueio consultivo da cadeia. |
 | `auth_find_user(email)` | Login acontece antes de haver contexto. Localiza o usuário pelo e-mail e devolve o hash da senha para comparação. |
-| `auth_register_login_failure(...)`, `auth_register_login_success(...)` | Contam falhas e bloqueiam a conta antes de haver contexto. |
+| `auth_login_blocked_until(...)`, `auth_register_login_failure(...)`, `auth_register_login_success(...)` | Contam falhas por conta e origem (`login_throttle`, 0007) e calculam a espera antes de haver contexto. A conta nunca é bloqueada por inteiro. |
+| `platform_tenant_active_users(tenant)` | Contagem de usuários ativos de uma empresa para o operador da plataforma, que não enxerga linhas de usuários de empresa (0007). |
 | `auth_find_session(token_hash)` | Resolve o cookie em sessão, usuário e papel antes de haver contexto. |
 | `api_token_find(token_hash)` | Resolve o token de API em empresa e escopos antes de haver contexto. |
 | `jobs_claim(worker, limit)` | O trabalhador pega trabalhos de qualquer empresa, com `FOR UPDATE SKIP LOCKED`. Depois executa cada trabalho no contexto da empresa dona. |

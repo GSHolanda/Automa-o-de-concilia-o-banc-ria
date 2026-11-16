@@ -3,8 +3,10 @@ import {
   aiCategorySuggestionsV1Schema,
   INTEGRATION_MODULES,
   integrationConfigSchemas,
+  integrationDestinationChanged,
   ledgerEntryInputV1Schema,
   mapConnectorItem,
+  maskUrl,
   NOTIFICATION_EVENTS,
   readPath,
 } from '../src/contracts/v1';
@@ -71,6 +73,41 @@ describe('configurações de integração', () => {
       provider: 'anthropic',
       model: 'claude-haiku-5-5',
     });
+  });
+
+  it('achado 7: endereço com usuário e senha embutidos é recusado em todos os tipos com URL', () => {
+    expect(integrationConfigSchemas.webhook.safeParse({ url: 'https://usuario:SENHA@exemplo.test/x' }).success).toBe(false);
+    expect(integrationConfigSchemas.webhook.safeParse({ url: 'https://usuario@exemplo.test/x' }).success).toBe(false);
+    expect(
+      integrationConfigSchemas.rest_ledger.safeParse({
+        baseUrl: 'https://a:b@erp.exemplo.test',
+        fieldMap: { date: 'd', amount: 'v', description: 'h' },
+      }).success,
+    ).toBe(false);
+    expect(integrationConfigSchemas.ai_provider.safeParse({ provider: 'anthropic', baseURL: 'https://k:s@ia.exemplo.test' }).success).toBe(
+      false,
+    );
+  });
+
+  it('achado 7: maskUrl mostra só esquema, host e porta', () => {
+    expect(maskUrl('https://hooks.exemplo.test:8443/services/T0K3N?apikey=XYZ')).toBe('https://hooks.exemplo.test:8443/…');
+    expect(maskUrl('https://exemplo.test')).toBe('https://exemplo.test');
+    expect(maskUrl('https://exemplo.test/')).toBe('https://exemplo.test');
+    expect(maskUrl('https://u:p@exemplo.test/x')).toBe('https://exemplo.test/…');
+    expect(maskUrl('nao-e-url')).toBe('[endereço inválido]');
+  });
+
+  it('achado 3: mudança de destino é detectada por tipo', () => {
+    const rest = { baseUrl: 'https://a.exemplo.test', path: '/l', authType: 'bearer', headerName: null };
+    expect(integrationDestinationChanged('rest_ledger', rest, { ...rest, path: '/outra' })).toBe(false);
+    expect(integrationDestinationChanged('rest_ledger', rest, { ...rest, baseUrl: 'https://b.exemplo.test' })).toBe(true);
+    expect(integrationDestinationChanged('rest_ledger', rest, { ...rest, authType: 'header', headerName: 'x-api-key' })).toBe(true);
+    expect(integrationDestinationChanged('ai_provider', { baseURL: null }, { baseURL: 'https://b.exemplo.test' })).toBe(true);
+    expect(integrationDestinationChanged('ai_provider', { baseURL: null, model: 'a' }, { baseURL: null, model: 'b' })).toBe(false);
+    const smtp = { host: 'smtp.exemplo.test', port: 587, secure: false, user: 'u' };
+    expect(integrationDestinationChanged('smtp', smtp, { ...smtp, port: 465 })).toBe(true);
+    expect(integrationDestinationChanged('smtp', smtp, { ...smtp, user: 'outro' })).toBe(false);
+    expect(integrationDestinationChanged('webhook', { url: 'https://a.exemplo.test/x' }, { url: 'https://b.exemplo.test/x' })).toBe(true);
   });
 
   it('conector REST exige mapa de campos com data, valor e descrição', () => {

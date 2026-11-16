@@ -37,7 +37,7 @@ const TENANT_SELECT = `
          l.plan_code, p.name AS plan_name, l.status AS license_status,
          to_char(l.valid_from, 'YYYY-MM-DD') AS valid_from, to_char(l.valid_until, 'YYYY-MM-DD') AS valid_until,
          l.limits_override, l.external_ref, l.notes,
-         (SELECT count(*)::int FROM users u WHERE u.tenant_id = t.id AND u.status = 'active') AS user_count
+         coalesce(platform_tenant_active_users(t.id), 0) AS user_count
     FROM tenants t
     LEFT JOIN tenant_licenses l ON l.tenant_id = t.id
     LEFT JOIN plans p ON p.code = l.plan_code`;

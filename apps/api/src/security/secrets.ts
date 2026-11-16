@@ -52,6 +52,19 @@ export function decryptSecret(masterKey: Buffer, owner: SecretOwner, blob: Buffe
   }
 }
 
+/** Chave atual e, durante a troca da chave mestra, a anterior com a sua versão. */
+export interface MasterKeys {
+  current: Buffer;
+  previous?: { version: number; key: Buffer } | null;
+}
+
+/** Decifra escolhendo a chave pela versão gravada no texto cifrado (anterior ou atual). */
+export function decryptWithMasterKeys(keys: MasterKeys, owner: SecretOwner, blob: Buffer): string {
+  const previous = keys.previous;
+  const key = previous && secretKeyVersion(blob) === previous.version ? previous.key : keys.current;
+  return decryptSecret(key, owner, blob);
+}
+
 /** Versão da chave gravada no texto cifrado. */
 export function secretKeyVersion(blob: Buffer): number | null {
   return Buffer.isBuffer(blob) && blob.length >= HEADER_BYTES ? blob[0]! : null;

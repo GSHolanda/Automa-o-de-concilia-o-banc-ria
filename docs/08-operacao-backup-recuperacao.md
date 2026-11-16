@@ -80,7 +80,7 @@ Observações do teste, sem maquiagem:
 |---|---|---|---|
 | `GET /healthz` | nenhuma | Processo da API de pé. Não toca no banco. | `200 {"status":"ok"}` |
 | `GET /readyz` | nenhuma | Conexão com o banco (`SELECT 1`) e versão do esquema igual à última migração da pasta de migrações. | `200 {"status":"ok","database":"ok","schema":"ok"}`; ou `503` com `"status":"unavailable"` e os campos `database` (`ok` ou `error`) e `schema` (`ok`, `outdated` ou `unknown`) |
-| `GET /metrics` | `Authorization: Bearer <METRICS_TOKEN>` se a variável estiver definida; sem token, aberto | Formato Prometheus. | Texto Prometheus, ou `401` com token ausente ou errado |
+| `GET /metrics` | `Authorization: Bearer <METRICS_TOKEN>`; em produção a API não sobe sem o token (fora de produção, sem token, aberto) | Formato Prometheus. | Texto Prometheus, ou `401` com token ausente ou errado |
 
 O `/readyz` é o endpoint para o balanceador e para as verificações de implantação. O `/healthz` serve para saber se o processo responde, sem depender do banco.
 

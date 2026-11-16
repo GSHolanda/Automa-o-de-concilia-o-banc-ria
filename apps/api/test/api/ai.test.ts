@@ -138,6 +138,37 @@ describe('sugestão de categorias por IA', () => {
     expect((await admin.get(`/integrations/${integrationId}`)).body.status).toBe('verified');
   });
 
+  it('achado 4: a chamada à IA não ocupa conexão do banco enquanto espera o provedor', async () => {
+    const small = await buildTestApp({ DB_POOL_MAX: '1' });
+    let release: () => void = () => undefined;
+    try {
+      const smallAdmin = await loggedIn(small, tenant.adminEmail);
+      const otherClient = await loggedIn(small, other.adminEmail);
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      ai.respond((request, res) => {
+        void gate.then(() => json(res, 200, fakeMessage(JSON.stringify(answerByName(request)))));
+      });
+      const before = ai.requests.length;
+      const pending = smallAdmin.post('/ai/suggest-categories', { bankTransactionIds: [transactions[1].id] });
+      const started = Date.now();
+      while (ai.requests.length === before) {
+        if (Date.now() - started > 5_000) throw new Error('A chamada ao provedor não aconteceu');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const me = await Promise.race([otherClient.get('/auth/me'), new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000))]);
+      expect(me?.status).toBe(200);
+      release();
+      const response = await pending;
+      expect(response.status, JSON.stringify(response.body)).toBe(200);
+      expect(response.body.items[0]).toMatchObject({ status: 'no_suggestion' });
+    } finally {
+      release();
+      await small.close();
+    }
+  });
+
   it('CA-27: provedor inalcançável ou com erro → 502 e a integração passa a error', async () => {
     ai.respond((_request, res) => json(res, 500, { type: 'error', error: { type: 'api_error', message: `falha ${API_KEY}` } }));
     const failed = await admin.post('/ai/suggest-categories', { bankTransactionIds: [transactions[1].id] });

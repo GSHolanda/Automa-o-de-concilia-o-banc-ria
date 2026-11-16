@@ -69,6 +69,17 @@ export interface RouteContext<P, Q, B> {
   settings: () => Promise<TenantSettings>;
 }
 
+/** O que existe dentro de uma transação curta de uma rota em etapas. */
+export type TransactionScope = Pick<RouteContext<unknown, unknown, unknown>, 'db' | 'audit' | 'entitlements' | 'settings'>;
+
+/**
+ * Contexto de rota em etapas: sem transação aberta durante o manipulador. Cada `transaction(...)` abre uma
+ * transação curta no contexto da requisição; chamadas a serviços externos ficam entre elas, sem conexão em uso.
+ */
+export interface StepsRouteContext<P, Q, B> extends Omit<RouteContext<P, Q, B>, 'db' | 'audit' | 'entitlements' | 'settings'> {
+  transaction: <T>(fn: (scope: TransactionScope) => Promise<T>) => Promise<T>;
+}
+
 export interface PublicRouteContext<P, Q, B> {
   params: P;
   query: Q;
@@ -86,18 +97,22 @@ interface RouteBase<P, Q, B> {
   params?: z.ZodType<P>;
   query?: z.ZodType<Q>;
   body?: z.ZodType<B>;
-  /** Limite de requisições por IP nesta rota. */
-  rateLimit?: { max: number; timeWindow: string };
+  /**
+   * Limite de requisições nesta rota. Padrão: por IP. `key` muda a chave (ex.: IP + e-mail no login) e é
+   * calculada depois da leitura do corpo.
+   */
+  rateLimit?: { max: number; timeWindow: string; key?: (req: FastifyRequest) => string };
   /** A rota recebe multipart/form-data; o corpo é lido pelo próprio manipulador. */
   multipart?: boolean;
 }
 
 export interface PublicRoute<P, Q, B> extends RouteBase<P, Q, B> {
   auth: 'public';
+  transaction?: undefined;
   handler: (context: PublicRouteContext<P, Q, B>) => Promise<unknown>;
 }
 
-export interface ProtectedRoute<P, Q, B> extends RouteBase<P, Q, B> {
+interface ProtectedRouteBase<P, Q, B> extends RouteBase<P, Q, B> {
   auth: Exclude<AuthMode, 'public'>;
   /** Permissão exigida do papel do usuário. Nulo: basta estar autenticado. */
   permission: PermissionKey | null;
@@ -109,10 +124,24 @@ export interface ProtectedRoute<P, Q, B> extends RouteBase<P, Q, B> {
   write?: boolean;
   /** Permitida mesmo quando o usuário ainda precisa trocar a senha temporária. */
   allowPendingPasswordChange?: boolean;
+}
+
+/** Rota comum: o manipulador inteiro roda em uma transação. */
+export interface ProtectedRoute<P, Q, B> extends ProtectedRouteBase<P, Q, B> {
+  transaction?: 'request';
   handler: (context: RouteContext<P, Q, B>) => Promise<unknown>;
 }
 
-export type RouteDefinition<P = unknown, Q = unknown, B = unknown> = PublicRoute<P, Q, B> | ProtectedRoute<P, Q, B>;
+/** Rota que chama serviço externo: transações curtas antes e depois da chamada. */
+export interface StepsRoute<P, Q, B> extends ProtectedRouteBase<P, Q, B> {
+  transaction: 'steps';
+  handler: (context: StepsRouteContext<P, Q, B>) => Promise<unknown>;
+}
+
+export type RouteDefinition<P = unknown, Q = unknown, B = unknown> =
+  | PublicRoute<P, Q, B>
+  | ProtectedRoute<P, Q, B>
+  | StepsRoute<P, Q, B>;
 
 /** Preserva a inferência dos tipos de parâmetros, consulta e corpo a partir dos esquemas. */
 export function route<P = unknown, Q = unknown, B = unknown>(definition: RouteDefinition<P, Q, B>): RouteDefinition {
@@ -149,6 +178,11 @@ function send(reply: FastifyReply, result: unknown): FastifyReply {
   return reply.send(result ?? null);
 }
 
+function rateLimitOptions(limit: NonNullable<RouteBase<unknown, unknown, unknown>['rateLimit']>) {
+  const { key, ...rest } = limit;
+  return key ? { ...rest, hook: 'preHandler' as const, keyGenerator: key } : rest;
+}
+
 export function registerRoutes(app: FastifyInstance, deps: AppDeps, routes: readonly RouteDefinition[]): void {
   for (const definition of routes) {
     deps.routes.push(definition);
@@ -156,7 +190,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, routes: read
       method: definition.method,
       url: `${API_PREFIX}${definition.url}`,
       config: {
-        ...(definition.rateLimit && deps.config.rateLimitEnabled ? { rateLimit: definition.rateLimit } : {}),
+        ...(definition.rateLimit && deps.config.rateLimitEnabled ? { rateLimit: rateLimitOptions(definition.rateLimit) } : {}),
       },
       handler: async (req, reply) => {
         const params = parseWith(definition.params, req.params);
@@ -204,18 +238,32 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, routes: read
           platform: platformContext,
         };
 
-        const result = await withContext(deps.pool, context, async (db) => {
-          let entitlementsCache: Entitlements | undefined;
-          let settingsCache: TenantSettings | undefined;
-          const entitlements = async () => {
-            entitlementsCache ??= await loadEntitlements(db, auth.tenantId as string);
-            return entitlementsCache;
-          };
-          const settings = async () => {
-            settingsCache ??= (await getTenantSettings(db, auth.tenantId as string)).settings;
-            return settingsCache;
-          };
+        // Abre uma transação no contexto da requisição com auditoria, plano e configuração da empresa.
+        const inTransaction = <T>(fn: (scope: TransactionScope) => Promise<T>): Promise<T> =>
+          withContext(deps.pool, context, async (db) => {
+            let entitlementsCache: Entitlements | undefined;
+            let settingsCache: TenantSettings | undefined;
+            const entitlements = async () => {
+              entitlementsCache ??= await loadEntitlements(db, auth.tenantId as string);
+              return entitlementsCache;
+            };
+            const settings = async () => {
+              settingsCache ??= (await getTenantSettings(db, auth.tenantId as string)).settings;
+              return settingsCache;
+            };
+            const audit = (entry: AuditInput) =>
+              writeAudit(db, {
+                ...entry,
+                tenantId: entry.tenantId === undefined ? auth.tenantId : entry.tenantId,
+                actor: entry.actor ?? actorOf(auth),
+                requestId: req.id,
+                ip: req.ip,
+              });
+            return fn({ db, audit, entitlements, settings });
+          });
 
+        // Licença, módulo e toque da sessão: valem para os dois modos de transação.
+        const preamble = async ({ db, entitlements }: TransactionScope): Promise<void> => {
           if (!platformContext) {
             const isWrite = definition.write ?? definition.method !== 'GET';
             if (isWrite || definition.module) {
@@ -234,38 +282,41 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, routes: read
               }
             }
           }
-
           if (auth.kind === 'session' && auth.sessionTouchDue) {
             await db.query('UPDATE sessions SET last_seen_at = now() WHERE id = $1', [auth.sessionId]);
           }
+        };
 
-          const audit = (entry: AuditInput) =>
-            writeAudit(db, {
-              ...entry,
-              tenantId: entry.tenantId === undefined ? auth.tenantId : entry.tenantId,
-              actor: entry.actor ?? actorOf(auth),
-              requestId: req.id,
-              ip: req.ip,
-            });
-
-          return definition.handler({
-            db,
-            auth,
-            get tenantId(): string {
-              if (auth.tenantId === null) throw unauthenticated();
-              return auth.tenantId;
+        // Objeto novo a cada uso: `tenantId` continua um acesso preguiçoso (lança erro sem empresa).
+        const contextWith = <E extends object>(extra: E) =>
+          Object.assign(
+            {
+              auth,
+              get tenantId(): string {
+                if (auth.tenantId === null) throw unauthenticated();
+                return auth.tenantId;
+              },
+              params,
+              query,
+              body,
+              req,
+              reply,
+              deps,
             },
-            params,
-            query,
-            body,
-            req,
-            reply,
-            deps,
-            audit,
-            entitlements,
-            settings,
+            extra,
+          );
+
+        let result: unknown;
+        if (definition.transaction === 'steps') {
+          await inTransaction(preamble);
+          result = await definition.handler(contextWith({ transaction: inTransaction }));
+        } else {
+          const handler = definition.handler;
+          result = await inTransaction(async (scope) => {
+            await preamble(scope);
+            return handler(contextWith(scope));
           });
-        });
+        }
 
         return send(reply, result);
       },

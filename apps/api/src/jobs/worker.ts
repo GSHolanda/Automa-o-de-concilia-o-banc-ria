@@ -7,7 +7,7 @@ import { DELIVER_JOB_TYPE, emitNotification } from '../modules/notifications/ser
 import { MAINTENANCE_CHECK_INTERVAL_MS, scheduleMaintenanceJobs } from './maintenance';
 import { retryDelayMs } from './queue';
 import { getJobHandler } from './registry';
-import { WORKER_ACTOR, type JobDeps, type JobRecord } from './types';
+import { WORKER_ACTOR, type JobDeps, type JobRecord, type JobTransactionScope } from './types';
 
 export type JobOutcome = 'succeeded' | 'retried' | 'dead';
 
@@ -105,7 +105,8 @@ async function markFailed(deps: JobDeps, job: JobRecord, workerId: string, error
 }
 
 /**
- * Executa um trabalho capturado. O manipulador roda em transação própria no contexto da empresa;
+ * Executa um trabalho capturado. O manipulador roda em transação própria no contexto da empresa
+ * (ou, em etapas, em transações curtas entre as chamadas externas);
  * a atualização de situação do trabalho vem depois, em outra transação, para que uma falha do
  * manipulador (desfeita por inteiro) ainda seja registrada.
  */
@@ -115,18 +116,17 @@ export async function processJob(deps: JobDeps, job: JobRecord, workerId: string
   try {
     const handler = getJobHandler(job.type);
     if (!handler) throw new Error(`Tipo de trabalho desconhecido: ${job.type}`);
-    const result = await withContext(
-      deps.pool,
-      { tenantId: job.tenant_id, userId: job.created_by },
-      (db) =>
-        handler.run({
+    const inTransaction = <T>(fn: (scope: JobTransactionScope) => Promise<T>): Promise<T> =>
+      withContext(deps.pool, { tenantId: job.tenant_id, userId: job.created_by }, (db) =>
+        fn({
           db,
-          job,
-          tenantId: job.tenant_id,
-          deps,
           audit: (entry) => writeAudit(db, { ...entry, tenantId: job.tenant_id, actor: entry.actor ?? WORKER_ACTOR }),
         }),
-    );
+      );
+    const result =
+      handler.transaction === 'steps'
+        ? await handler.run({ job, tenantId: job.tenant_id, deps, transaction: inTransaction })
+        : await inTransaction((scope) => handler.run({ ...scope, job, tenantId: job.tenant_id, deps }));
     await withContext(deps.pool, { tenantId: job.tenant_id }, (db) =>
       db.query(
         `UPDATE jobs

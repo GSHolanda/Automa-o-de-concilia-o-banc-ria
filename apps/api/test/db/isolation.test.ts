@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { assertSafeRuntimeRole, withContext } from '../../src/db/context';
+import { randomUUID } from 'node:crypto';
+import { assertSafeRuntimeRole, withContext, type Db } from '../../src/db/context';
 import {
   appPool,
   asTenant,
@@ -143,6 +144,65 @@ describe('isolamento no banco (RLS)', () => {
     await expect(
       asTenant(a.id, (db) => db.query(`UPDATE tenants SET status = 'archived' WHERE id = $1`, [a.id])),
     ).rejects.toThrow(/plataforma/);
+  });
+});
+
+describe('revisão de segurança, achado 8: linha de users', () => {
+  const asSelf = <T>(fn: (db: Db) => Promise<T>) => asTenant(a.id, fn, { userId: a.userId });
+
+  it('o próprio usuário não se promove a operador da plataforma nem sai da empresa', async () => {
+    await expect(
+      asSelf((db) =>
+        db.query('UPDATE users SET tenant_id = NULL, role_id = NULL, is_platform_admin = true WHERE id = $1', [a.userId]),
+      ),
+    ).rejects.toMatchObject({ code: '42501' });
+    await expect(asSelf((db) => db.query('UPDATE users SET tenant_id = $2 WHERE id = $1', [a.userId, b.id]))).rejects.toMatchObject({
+      code: expect.stringMatching(/42501|23503/),
+    });
+  });
+
+  it('o próprio usuário não muda o próprio papel nem a própria situação; o nome pode', async () => {
+    const otherRole = await ownerPool().query<{ id: string }>(
+      `INSERT INTO roles (tenant_id, key, name, permissions) VALUES ($1, 'outro-papel', 'Outro', '{}') RETURNING id`,
+      [a.id],
+    );
+    await expect(
+      asSelf((db) => db.query('UPDATE users SET role_id = $2 WHERE id = $1', [a.userId, otherRole.rows[0]!.id])),
+    ).rejects.toMatchObject({ code: '42501' });
+    await expect(asSelf((db) => db.query(`UPDATE users SET status = 'disabled' WHERE id = $1`, [a.userId]))).rejects.toMatchObject({
+      code: '42501',
+    });
+    const renamed = await asSelf((db) => db.query(`UPDATE users SET name = 'Nome novo' WHERE id = $1`, [a.userId]));
+    expect(renamed.rowCount).toBe(1);
+  });
+
+  it('outro usuário da empresa não move linha para outra empresa nem cria operador da plataforma', async () => {
+    const colleague = await ownerPool().query<{ id: string }>(
+      `INSERT INTO users (tenant_id, role_id, email, name, password_hash) VALUES ($1, $2, $3, 'Colega', 'x') RETURNING id`,
+      [a.id, a.roleId, `colega-${randomUUID().slice(0, 8)}@exemplo.test`],
+    );
+    const asColleague = <T>(fn: (db: Db) => Promise<T>) => asTenant(a.id, fn, { userId: colleague.rows[0]!.id });
+    await expect(
+      asColleague((db) => db.query('UPDATE users SET tenant_id = NULL, role_id = NULL, is_platform_admin = true WHERE id = $1', [a.userId])),
+    ).rejects.toMatchObject({ code: '42501' });
+    await expect(
+      asColleague((db) =>
+        db.query(
+          `INSERT INTO users (tenant_id, role_id, email, name, password_hash, is_platform_admin) VALUES (NULL, NULL, 'x@exemplo.test', 'X', 'x', true)`,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '42501' });
+  });
+
+  it('no contexto de plataforma, usuários de empresa (e seus hashes) não são visíveis; a contagem vem de função', async () => {
+    await withContext(appPool(), { platform: true }, async (db) => {
+      const visible = await db.query('SELECT count(*)::int AS total FROM users WHERE tenant_id IS NOT NULL');
+      expect(visible.rows[0].total).toBe(0);
+      const counted = await db.query('SELECT platform_tenant_active_users($1) AS total', [a.id]);
+      expect(counted.rows[0].total).toBeGreaterThan(0);
+    });
+    const outside = await asTenant(b.id, (db) => db.query('SELECT platform_tenant_active_users($1) AS total', [a.id]));
+    expect(outside.rows[0].total).toBeNull();
   });
 });
 
