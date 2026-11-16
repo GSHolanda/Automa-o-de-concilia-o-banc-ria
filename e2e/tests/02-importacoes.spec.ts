@@ -1,4 +1,6 @@
-import { expect, loginAs, test } from '../support/fixtures';
+import { captura, expect, loginAs, test } from '../support/fixtures';
+
+test.use({ deviceScaleFactor: 2 });
 
 interface Batch { id: string; fileName: string; sourceKind: string; status: string }
 
@@ -19,6 +21,8 @@ test.describe('2. Importações', () => {
       await expect(tabela.getByRole('link', { name: arquivo })).toBeVisible();
     }
     await expect(tabela.getByRole('row').filter({ hasText: 'lancamentos-2024-01.xlsx' })).toContainText('Concluída');
+
+    await captura(page, 'importacao');
 
     // Detalhe do lote
     await tabela.getByRole('link', { name: 'extrato-movimento-2024-01.ofx', exact: true }).click();

@@ -1,4 +1,6 @@
-import { expect, loginAs, test, logout, demoEmail, login } from '../support/fixtures';
+import { captura, expect, loginAs, test, logout, demoEmail, login } from '../support/fixtures';
+
+test.use({ deviceScaleFactor: 2 });
 
 interface Summary { count: number; amountCents: number }
 interface Dashboard {
@@ -14,8 +16,8 @@ test.describe('1. Acesso e painel', () => {
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole('heading', { name: 'Painel', level: 1 })).toBeVisible();
 
-    await page.getByLabel('De').fill('2024-01-01');
-    await page.getByLabel('Até').fill('2024-01-31');
+    await page.getByLabel('De', { exact: true }).fill('2024-01-01');
+    await page.getByLabel('Até', { exact: true }).fill('2024-01-31');
     const dash = await page.request.get('/api/v1/dashboard?dateFrom=2024-01-01&dateTo=2024-01-31');
     expect(dash.status()).toBe(200);
     const data = (await dash.json()) as Dashboard;
@@ -36,6 +38,8 @@ test.describe('1. Acesso e painel', () => {
       ['reconciled', 'pending', 'divergent', 'ignored', 'awaitingApproval'].reduce((t, k) => t + (side[k]?.count ?? 0), 0);
     expect(sum(data.bank)).toBe(data.bank.total!.count);
     expect(sum(data.ledger)).toBe(data.ledger.total!.count);
+    await expect(page.getByRole('table', { name: 'Situações por conta bancária' })).toBeVisible();
+    await captura(page, 'painel');
   });
 
   test('o menu respeita as permissões de cada papel', async ({ page }) => {
