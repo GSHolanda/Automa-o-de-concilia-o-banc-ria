@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../../api/client';
 import { Button } from '../../components/Button';
 import { Field } from '../../components/Field';
@@ -159,7 +159,10 @@ function ReasonModal({ open, title, description, confirmLabel, destructive, busy
   const [reason, setReason] = useState('');
   const [touched, setTouched] = useState(false);
   const empty = reason.trim() === '';
-  const handleClose = () => { setReason(''); setTouched(false); onClose(); };
+  useEffect(() => {
+    if (!open) { setReason(''); setTouched(false); }
+  }, [open]);
+  const handleClose = onClose;
   return (
     <Modal
       open={open}

@@ -23,6 +23,7 @@ import { ModulosPage } from './features/configuracoes/ModulosPage';
 import { ImportacaoDetalhePage } from './features/importacoes/ImportacaoDetalhePage';
 import { ImportacoesPage } from './features/importacoes/ImportacoesPage';
 import { NovaImportacaoPage } from './features/importacoes/NovaImportacaoPage';
+import { ConciliacaoPage } from './features/conciliacao/ConciliacaoPage';
 import { EmConstrucao } from './pages/EmConstrucao';
 
 export interface AppRoute {
@@ -49,7 +50,7 @@ export const APP_ROUTES: AppRoute[] = [
   { path: '/importacoes', title: 'Importações', element: <ImportacoesPage />, permission: 'imports.view', menu: true },
   { path: '/importacoes/nova', title: 'Nova importação', element: <NovaImportacaoPage />, permission: 'imports.create' },
   { path: '/importacoes/:id', title: 'Importação', element: <ImportacaoDetalhePage />, permission: 'imports.view' },
-  { path: '/conciliacao', title: 'Conciliação', element: stub('Conciliação'), permission: 'reconciliation.view', menu: true },
+  { path: '/conciliacao', title: 'Conciliação', element: <ConciliacaoPage />, permission: 'reconciliation.view', menu: true },
   { path: '/aprovacoes', title: 'Aprovações', element: <AprovacoesPage />, permission: 'reconciliation.approve', module: 'approvals', menu: true },
   { path: '/relatorios', title: 'Relatórios', element: stub('Relatórios'), permission: 'exports.create', menu: true },
   { path: '/auditoria', title: 'Auditoria', element: <AuditoriaPage />, permission: 'audit.view', menu: true },
