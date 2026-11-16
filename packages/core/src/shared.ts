@@ -11,3 +11,4 @@ export { RULE_CODES, RULE_LABELS, type RuleCode, type ScoreBreakdown } from './m
 export type { ReconRules } from './matching/rules';
 export type { TenantSettings, TenantSettingsPatch, ApprovalSettings } from './settings/schema';
 export type { ImportProfileConfig, ImportProfileColumns } from './import-profile';
+export * from './contracts/v1';

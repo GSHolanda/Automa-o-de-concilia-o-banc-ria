@@ -325,7 +325,8 @@ export interface MatchRow {
   bank_account_id: string | null;
   match_type: MatchType;
   status: MatchStatus;
-  origin: 'engine' | 'user';
+  /** `ai`: sugestão de classificação de provedor de IA, sempre sujeita a aceite humano. */
+  origin: 'engine' | 'user' | 'ai';
   auto_confirmed: boolean;
   rule_code: string | null;
   engine_version: string | null;

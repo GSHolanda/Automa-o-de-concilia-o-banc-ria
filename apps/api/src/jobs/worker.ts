@@ -3,6 +3,7 @@ import { hostname } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { writeAudit } from '../audit/audit';
 import { withContext, type Db } from '../db/context';
+import { DELIVER_JOB_TYPE, emitNotification } from '../modules/notifications/service';
 import { retryDelayMs } from './queue';
 import { getJobHandler } from './registry';
 import { WORKER_ACTOR, type JobDeps, type JobRecord } from './types';
@@ -42,20 +43,19 @@ export async function releaseStaleJobs(deps: JobDeps): Promise<number> {
   return result.rows[0]?.released ?? 0;
 }
 
-/** Aviso interno a quem administra a empresa. */
+/** Aviso a quem administra a empresa (e às regras do evento `job.dead`). */
 async function notifyDead(db: Db, job: JobRecord, error: string): Promise<void> {
-  await db.query(
-    `INSERT INTO notifications (tenant_id, user_id, event, title, body, link)
-     SELECT u.tenant_id, u.id, 'job.dead', $2, $3, '/importacoes'
-       FROM users u
-       JOIN roles r ON r.id = u.role_id AND r.tenant_id = u.tenant_id
-      WHERE u.tenant_id = $1 AND u.status = 'active' AND 'settings.manage' = ANY (r.permissions)`,
-    [
-      job.tenant_id,
-      'Trabalho em falha definitiva',
-      `O trabalho ${job.type} falhou ${job.attempts} vez(es) e não será repetido automaticamente: ${error.slice(0, 500)}`,
-    ],
-  );
+  await emitNotification(db, {
+    tenantId: job.tenant_id,
+    event: 'job.dead',
+    title: 'Trabalho em falha definitiva',
+    body: `O trabalho ${job.type} falhou ${job.attempts} vez(es) e não será repetido automaticamente: ${error.slice(0, 500)}`,
+    link: '/importacoes',
+    data: { jobId: job.id, type: job.type, attempts: job.attempts, error: error.slice(0, 500) },
+    defaultRecipients: { permission: 'settings.manage' },
+    // Falha definitiva de uma entrega não gera nova entrega externa.
+    internalOnly: job.type === DELIVER_JOB_TYPE,
+  });
 }
 
 async function markFailed(deps: JobDeps, job: JobRecord, workerId: string, error: string): Promise<JobOutcome> {

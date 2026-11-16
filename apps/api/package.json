@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "@concilia/core": "workspace:*",
     "@fastify/cookie": "^11.1.5",
     "@fastify/helmet": "^13.2.0",

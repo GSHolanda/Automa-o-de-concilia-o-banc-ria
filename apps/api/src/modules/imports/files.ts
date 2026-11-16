@@ -17,13 +17,15 @@ import {
 } from '@concilia/core';
 import { badRequest } from '../../http/errors';
 
-export type FileFormat = 'ofx' | 'csv' | 'xlsx';
+/** `json`: lote de lançamentos recebido pela API de entrada ou pelo conector (não vem de envio de arquivo). */
+export type FileFormat = 'ofx' | 'csv' | 'xlsx' | 'json';
 export type SourceKind = 'bank' | 'ledger';
 
 export const CONTENT_TYPES: Record<FileFormat, string> = {
   ofx: 'application/x-ofx',
   csv: 'text/csv; charset=utf-8',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  json: 'application/json',
 };
 
 /** Erro no conteúdo do arquivo ou no mapeamento: o lote falha sem repetir o trabalho. */
@@ -204,6 +206,9 @@ export async function buildPreview(input: PreviewInput): Promise<Record<string, 
         })),
         accountMatches: matches,
       };
+    }
+    if (input.format === 'json') {
+      throw new ImportContentError('Lote JSON (API ou conector) não tem pré-visualização de colunas.');
     }
     const options = tabularOptions(input.profileConfig);
     const table = await readTabular(input.format, input.content, {
