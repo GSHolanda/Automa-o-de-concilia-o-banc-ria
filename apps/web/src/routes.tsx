@@ -18,6 +18,9 @@ import { PlanoDeContasPage } from './features/cadastros/PlanoDeContasPage';
 import { EmpresaPage } from './features/configuracoes/EmpresaPage';
 import { IdentidadePage } from './features/configuracoes/IdentidadePage';
 import { ModulosPage } from './features/configuracoes/ModulosPage';
+import { ImportacaoDetalhePage } from './features/importacoes/ImportacaoDetalhePage';
+import { ImportacoesPage } from './features/importacoes/ImportacoesPage';
+import { NovaImportacaoPage } from './features/importacoes/NovaImportacaoPage';
 import { EmConstrucao } from './pages/EmConstrucao';
 
 export interface AppRoute {
@@ -41,7 +44,9 @@ const stub = (title: string) => <EmConstrucao title={title} />;
 /** Rotas de negócio. Outras equipes substituem `element` pela tela real da sua área. */
 export const APP_ROUTES: AppRoute[] = [
   { path: '/', title: 'Painel', element: stub('Painel'), permission: 'dashboard.view', menu: true },
-  { path: '/importacoes', title: 'Importações', element: stub('Importações'), permission: 'imports.view', menu: true },
+  { path: '/importacoes', title: 'Importações', element: <ImportacoesPage />, permission: 'imports.view', menu: true },
+  { path: '/importacoes/nova', title: 'Nova importação', element: <NovaImportacaoPage />, permission: 'imports.create' },
+  { path: '/importacoes/:id', title: 'Importação', element: <ImportacaoDetalhePage />, permission: 'imports.view' },
   { path: '/conciliacao', title: 'Conciliação', element: stub('Conciliação'), permission: 'reconciliation.view', menu: true },
   { path: '/aprovacoes', title: 'Aprovações', element: stub('Aprovações'), permission: 'reconciliation.approve', module: 'approvals', menu: true },
   { path: '/relatorios', title: 'Relatórios', element: stub('Relatórios'), permission: 'exports.create', menu: true },
