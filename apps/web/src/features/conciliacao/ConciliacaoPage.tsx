@@ -1,6 +1,8 @@
 import { ITEM_KINDS, ITEM_KIND_LABELS } from '@concilia/core/shared';
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
+import { api } from '../../api/client';
 import { useAuth } from '../../auth';
 import { Button } from '../../components/Button';
 import { Field } from '../../components/Field';
@@ -8,12 +10,12 @@ import { PageHeader } from '../../components/PageHeader';
 import { Select } from '../../components/Select';
 import { Tabs, type TabItem } from '../../components/Tabs';
 import { useAcoes } from './acoes';
-import { amountInvalid, useOptions } from './comum';
+import { amountInvalid, itemQuery, useOptions } from './comum';
 import { DetalheDrawer } from './Detalhe';
 import { ExecutarModal } from './ExecutarModal';
-import { ItensTab, useItemCount } from './Itens';
+import { ItensTab } from './Itens';
 import { SugestoesTab, useSugestoes } from './Sugestoes';
-import { EMPTY_FILTERS, type DetailTarget, type Filters, type ItemStatus, type Side } from './tipos';
+import { EMPTY_FILTERS, RECON_KEY, type Counts, type DetailTarget, type Filters, type ItemStatus, type Side } from './tipos';
 import './conciliacao.css';
 
 const ABAS = ['sugestoes', 'pendentes', 'divergentes', 'conciliados', 'ignorados'] as const;
@@ -70,19 +72,20 @@ export function ConciliacaoPage() {
   const [runOpen, setRunOpen] = useState(false);
 
   const sugestoes = useSugestoes(filters);
-  const pend = useItemCount(awaiting ? 'awaiting_approval' : 'pending', filters);
-  const div = useItemCount('divergent', filters);
-  const conc = useItemCount('reconciled', filters);
-  const ign = useItemCount('ignored', filters);
+  const counts = useQuery({
+    queryKey: [...RECON_KEY, 'counts', filters],
+    queryFn: () => api.get<Counts>('/reconciliation/counts', itemQuery(filters)),
+  });
 
-  const tab = (key: Aba, label: string, c: { n: number; capped: boolean } | undefined): TabItem =>
-    !c ? { key, label } : c.capped ? { key, label: `${label} (${c.n}+)` } : { key, label, count: c.n };
+  const tab = (key: Aba, label: string, count: number | undefined): TabItem =>
+    count === undefined ? { key, label } : { key, label, count };
+  const c = counts.data;
   const tabs: TabItem[] = [
-    tab('sugestoes', 'Sugestões', sugestoes.query.data ? { n: sugestoes.items.length, capped: sugestoes.capped } : undefined),
-    tab('pendentes', awaiting ? 'Aguardando aprovação' : 'Pendentes', pend.data),
-    tab('divergentes', 'Divergentes', div.data),
-    tab('conciliados', 'Conciliados', conc.data),
-    tab('ignorados', 'Ignorados', ign.data),
+    tab('sugestoes', 'Sugestões', c?.suggestions),
+    tab('pendentes', awaiting ? 'Aguardando aprovação' : 'Pendentes', awaiting ? c?.awaitingApproval : c?.pending),
+    tab('divergentes', 'Divergentes', c?.divergent),
+    tab('conciliados', 'Conciliados', c?.reconciled),
+    tab('ignorados', 'Ignorados', c?.ignored),
   ];
 
   const filtered = Object.values(filters).some(Boolean);

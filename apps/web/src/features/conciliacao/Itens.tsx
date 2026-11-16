@@ -13,18 +13,9 @@ import { StatusBadge } from '../../components/StatusBadge';
 import { useWrite } from '../shared';
 import { doneMessage, useConflict, type Acoes } from './acoes';
 import { itemQuery, plural, SIDE_LABEL } from './comum';
-import { COUNT_LIMIT, RECON_KEY, type Filters, type ItemStatus, type ReconItem, type Side } from './tipos';
+import { RECON_KEY, type Filters, type ItemStatus, type ReconItem, type Side } from './tipos';
 
 const PAGE_SIZE = 50;
-
-/** Contagem de itens (extrato + lançamentos) por situação, limitada a 200. */
-export function useItemCount(status: ItemStatus, filters: Filters) {
-  return useQuery({
-    queryKey: [...RECON_KEY, 'count', status, filters],
-    queryFn: () => api.get<Page<ReconItem>>('/reconciliation/items', { status, ...itemQuery(filters), limit: COUNT_LIMIT }),
-    select: (d) => ({ n: d.items.length, capped: Boolean(d.nextCursor) }),
-  });
-}
 
 interface Common {
   status: ItemStatus;

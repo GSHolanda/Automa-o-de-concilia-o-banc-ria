@@ -18,6 +18,8 @@ import {
   type DecisionContext,
 } from './decisions';
 import {
+  countMatches,
+  countReconItems,
   findReconItem,
   findRun,
   getMatchView,
@@ -220,6 +222,28 @@ export const routes: RouteDefinition[] = [
     summary: 'Classificar uma transação sem lançamento correspondente',
     body: z.object({ bankTransactionId: z.uuid(), categoryId: z.uuid(), note }),
     handler: async (ctx) => created(await classifyItem(await decisionContext(ctx), ctx.body)),
+  }),
+
+  route({
+    tags: TAGS,
+    auth: 'session',
+    permission: 'reconciliation.view',
+    method: 'GET',
+    url: '/reconciliation/counts',
+    summary: 'Contagens para as abas da conciliação (itens por situação e sugestões abertas), com os filtros da lista',
+    query: reconItemFiltersSchema.omit({ status: true, side: true, hasSuggestion: true }),
+    handler: async ({ db, tenantId, query }) => {
+      const items = await countReconItems(db, tenantId, query);
+      const suggestions = await countMatches(db, tenantId, { ...query, status: 'suggested' });
+      return {
+        suggestions,
+        pending: items.pending,
+        awaitingApproval: items.awaiting_approval,
+        divergent: items.divergent,
+        reconciled: items.reconciled,
+        ignored: items.ignored,
+      };
+    },
   }),
 
   // -- conciliações ---------------------------------------------------------

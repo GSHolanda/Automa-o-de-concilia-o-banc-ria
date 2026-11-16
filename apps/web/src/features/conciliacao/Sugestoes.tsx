@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { api, errorMessage, type Page } from '../../api/client';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
@@ -7,18 +7,17 @@ import { EmptyState } from '../../components/EmptyState';
 import { Spinner } from '../../components/Spinner';
 import { useWrite } from '../shared';
 import { useConflict, type Acoes } from './acoes';
-import { matchPasses, MatchFlags, plural, SideCard } from './comum';
+import { itemQuery, MatchFlags, plural, SideCard } from './comum';
 import { Pct } from './Detalhe';
 import { COUNT_LIMIT, RECON_KEY, type Filters, type Match } from './tipos';
 
-/** Sugestões abertas (até 200), filtradas no navegador pelos filtros da barra. */
+/** Sugestões abertas (até 200), filtradas no servidor pelos filtros da barra. */
 export function useSugestoes(filters: Filters) {
   const q = useQuery({
-    queryKey: [...RECON_KEY, 'matches', 'suggested', filters.bankAccountId],
-    queryFn: () =>
-      api.get<Page<Match>>('/reconciliation/matches', { status: 'suggested', bankAccountId: filters.bankAccountId, limit: COUNT_LIMIT }),
+    queryKey: [...RECON_KEY, 'matches', 'suggested', filters],
+    queryFn: () => api.get<Page<Match>>('/reconciliation/matches', { status: 'suggested', ...itemQuery(filters), limit: COUNT_LIMIT }),
   });
-  const items = useMemo(() => (q.data?.items ?? []).filter((m) => matchPasses(m, filters)), [q.data, filters]);
+  const items = q.data?.items ?? [];
   return { query: q, items, capped: Boolean(q.data?.nextCursor) };
 }
 

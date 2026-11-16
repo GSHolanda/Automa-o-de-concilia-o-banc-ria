@@ -221,23 +221,17 @@ export interface ItemPage {
 }
 
 /**
- * Itens de extrato e lançamentos com os filtros da revisão, em ordem de data decrescente.
- * Sem `side`, une os dois lados. Paginação por cursor opaco (data, lado, id).
+ * Condições de filtro de um lado (extrato ou lançamentos), compartilhadas pela listagem e pelas contagens.
+ * `withStatus` falso ignora o filtro de situação (as contagens agrupam por ela).
  */
-export async function queryReconItems(
-  db: Db,
-  tenantId: string,
+function itemConditions(
   filters: ReconItemFilters,
-  page: ItemPage,
-): Promise<{ items: ReconItemView[]; nextCursor?: string }> {
-  const values: unknown[] = [tenantId];
-  const param = (value: unknown, cast = ''): string => {
-    values.push(value);
-    return `$${values.length}${cast}`;
-  };
+  param: (value: unknown, cast?: string) => string,
+  withStatus: boolean,
+): (side: Side) => string[] {
   const ph = {
     account: filters.bankAccountId ? param(filters.bankAccountId, '::uuid') : null,
-    status: filters.status ? param(filters.status) : null,
+    status: withStatus && filters.status ? param(filters.status) : null,
     kind: filters.kind ? param(filters.kind) : null,
     dateFrom: filters.dateFrom ? param(filters.dateFrom, '::date') : null,
     dateTo: filters.dateTo ? param(filters.dateTo, '::date') : null,
@@ -246,14 +240,8 @@ export async function queryReconItems(
     like: filters.q ? param(`%${escapeLike(filters.q)}%`) : null,
     likeNorm: filters.q ? param(`%${escapeLike(normalizeDescription(filters.q))}%`) : null,
     identifier: filters.q ? param(normalizeIdentifier(filters.q) ?? '') : null,
-    cursor: page.cursor ? decodeItemCursor(page.cursor) : null,
   };
-  const cursorPh = ph.cursor
-    ? { date: param(ph.cursor.date, '::date'), side: param(ph.cursor.side, '::text'), id: param(ph.cursor.id, '::uuid') }
-    : null;
-  const limitPh = param(page.limit + 1, '::int');
-
-  const branch = (side: Side): string => {
+  return (side) => {
     const date = side === 'bank' ? 't.posted_date' : 't.entry_date';
     const where = ['t.tenant_id = $1'];
     if (ph.account) where.push(`t.bank_account_id = ${ph.account}`);
@@ -278,6 +266,60 @@ export async function queryReconItems(
           OR t.reference ILIKE ${ph.like} OR t.external_id ILIKE ${ph.like} OR ${ph.identifier} = ANY (t.identifiers)${counterparty})`,
       );
     }
+    return where;
+  };
+}
+
+/** Contagem de itens (extrato e lançamentos) por situação exibida, com os mesmos filtros da listagem. */
+export async function countReconItems(
+  db: Db,
+  tenantId: string,
+  filters: ReconItemFilters,
+): Promise<Record<ItemStatus, number>> {
+  const values: unknown[] = [tenantId];
+  const param = (value: unknown, cast = ''): string => {
+    values.push(value);
+    return `$${values.length}${cast}`;
+  };
+  const conditions = itemConditions(filters, param, false);
+  const sides: Side[] = filters.side ? [filters.side] : ['bank', 'ledger'];
+  const result = await db.query<{ status: ItemStatus; n: string }>(
+    `SELECT x.status, count(*) AS n FROM (${sides
+      .map((side) => `${itemSelect(side)} WHERE ${conditions(side).join(' AND ')}`)
+      .map((sql) => `(${sql})`)
+      .join(' UNION ALL ')}) x GROUP BY x.status`,
+    values,
+  );
+  const counts: Record<ItemStatus, number> = { pending: 0, divergent: 0, reconciled: 0, ignored: 0, awaiting_approval: 0 };
+  for (const row of result.rows) counts[row.status] = Number(row.n);
+  return counts;
+}
+
+/**
+ * Itens de extrato e lançamentos com os filtros da revisão, em ordem de data decrescente.
+ * Sem `side`, une os dois lados. Paginação por cursor opaco (data, lado, id).
+ */
+export async function queryReconItems(
+  db: Db,
+  tenantId: string,
+  filters: ReconItemFilters,
+  page: ItemPage,
+): Promise<{ items: ReconItemView[]; nextCursor?: string }> {
+  const values: unknown[] = [tenantId];
+  const param = (value: unknown, cast = ''): string => {
+    values.push(value);
+    return `$${values.length}${cast}`;
+  };
+  const cursor = page.cursor ? decodeItemCursor(page.cursor) : null;
+  const cursorPh = cursor
+    ? { date: param(cursor.date, '::date'), side: param(cursor.side, '::text'), id: param(cursor.id, '::uuid') }
+    : null;
+  const limitPh = param(page.limit + 1, '::int');
+  const conditions = itemConditions(filters, param, true);
+
+  const branch = (side: Side): string => {
+    const date = side === 'bank' ? 't.posted_date' : 't.entry_date';
+    const where = conditions(side);
     if (cursorPh) where.push(`(${date}, '${side}'::text, t.id) < (${cursorPh.date}, ${cursorPh.side}, ${cursorPh.id})`);
     return `(${itemSelect(side)} WHERE ${where.join(' AND ')}
              ORDER BY ${date} DESC, t.id DESC LIMIT ${limitPh})`;
@@ -517,16 +559,19 @@ export const matchFiltersSchema = z.object({
   divergent: booleanQuery.optional(),
   ambiguous: booleanQuery.optional(),
   minConfidence: z.coerce.number().min(0).max(1).optional(),
+  // Filtros sobre os itens da conciliação: vale se ao menos um item satisfaz todos.
+  dateFrom: z.iso.date().optional(),
+  dateTo: z.iso.date().optional(),
+  amountMin: z.coerce.number().int().min(0).optional(),
+  amountMax: z.coerce.number().int().min(0).optional(),
+  direction: z.enum(['credit', 'debit']).optional(),
+  kind: z.enum(ITEM_KINDS).optional(),
+  q: z.string().trim().min(1).max(120).optional(),
 });
 export type MatchFilters = z.infer<typeof matchFiltersSchema>;
 
-export async function queryMatches(
-  db: Db,
-  tenantId: string,
-  filters: MatchFilters,
-  page: { limit: number; cursor?: { at: string; id: string } | null },
-): Promise<{ rows: MatchView[]; hasMore: boolean; last: { at: string; id: string } | null }> {
-  const values: unknown[] = [tenantId];
+/** Condições de filtro de `matches` (alias `m`); `values` já traz o tenantId em `$1`. */
+function matchConditions(filters: MatchFilters, values: unknown[]): string[] {
   const where = ['m.tenant_id = $1'];
   const add = (clause: string, value: unknown) => {
     values.push(value);
@@ -539,6 +584,54 @@ export async function queryMatches(
   if (filters.divergent !== undefined) where.push(filters.divergent ? 'm.divergence IS NOT NULL' : 'm.divergence IS NULL');
   if (filters.ambiguous !== undefined) where.push(filters.ambiguous ? 'm.ambiguous' : 'NOT m.ambiguous');
   if (filters.minConfidence !== undefined) add('m.confidence >= ?', filters.minConfidence);
+  const item: string[] = [];
+  const addItem = (clause: string, value: unknown) => {
+    values.push(value);
+    item.push(clause.replace('?', `$${values.length}`));
+  };
+  if (filters.dateFrom) addItem('coalesce(b.posted_date, l.entry_date) >= ?::date', filters.dateFrom);
+  if (filters.dateTo) addItem('coalesce(b.posted_date, l.entry_date) <= ?::date', filters.dateTo);
+  if (filters.amountMin !== undefined) addItem('abs(coalesce(b.amount_cents, l.amount_cents)) >= ?::bigint', filters.amountMin);
+  if (filters.amountMax !== undefined) addItem('abs(coalesce(b.amount_cents, l.amount_cents)) <= ?::bigint', filters.amountMax);
+  if (filters.direction) item.push(`coalesce(b.amount_cents, l.amount_cents) ${filters.direction === 'credit' ? '> 0' : '< 0'}`);
+  if (filters.kind) addItem('coalesce(b.kind, l.kind) = ?', filters.kind);
+  if (filters.q) {
+    values.push(`%${escapeLike(filters.q)}%`, `%${escapeLike(normalizeDescription(filters.q))}%`, normalizeIdentifier(filters.q) ?? '');
+    const [like, likeNorm, identifier] = [values.length - 2, values.length - 1, values.length].map((n) => `$${n}`);
+    item.push(
+      `(coalesce(b.description_raw, l.description_raw) ILIKE ${like} OR coalesce(b.description_norm, l.description_norm) LIKE ${likeNorm}
+        OR coalesce(b.document, l.document) ILIKE ${like} OR coalesce(b.reference, l.reference) ILIKE ${like}
+        OR coalesce(b.external_id, l.external_id) ILIKE ${like} OR ${identifier} = ANY (coalesce(b.identifiers, l.identifiers))
+        OR l.counterparty ILIKE ${like})`,
+    );
+  }
+  if (item.length > 0) {
+    where.push(
+      `EXISTS (SELECT 1 FROM match_items mi
+                 LEFT JOIN bank_transactions b ON b.tenant_id = mi.tenant_id AND b.id = mi.bank_transaction_id
+                 LEFT JOIN ledger_entries l ON l.tenant_id = mi.tenant_id AND l.id = mi.ledger_entry_id
+                WHERE mi.tenant_id = m.tenant_id AND mi.match_id = m.id AND ${item.join(' AND ')})`,
+    );
+  }
+  return where;
+}
+
+/** Quantidade de conciliações (de uma situação) que atendem aos filtros. */
+export async function countMatches(db: Db, tenantId: string, filters: MatchFilters): Promise<number> {
+  const values: unknown[] = [tenantId];
+  const where = matchConditions(filters, values);
+  const result = await db.query<{ n: string }>(`SELECT count(*) AS n FROM matches m WHERE ${where.join(' AND ')}`, values);
+  return Number(result.rows[0]?.n ?? 0);
+}
+
+export async function queryMatches(
+  db: Db,
+  tenantId: string,
+  filters: MatchFilters,
+  page: { limit: number; cursor?: { at: string; id: string } | null },
+): Promise<{ rows: MatchView[]; hasMore: boolean; last: { at: string; id: string } | null }> {
+  const values: unknown[] = [tenantId];
+  const where = matchConditions(filters, values);
   if (page.cursor) {
     values.push(page.cursor.at, page.cursor.id);
     where.push(`(m.created_at, m.id) < ($${values.length - 1}::timestamptz, $${values.length}::uuid)`);

@@ -120,3 +120,13 @@ export const MATCH_STATUS_LABEL: Record<string, string> = {
   superseded: 'Substituída',
   undone: 'Desfeita',
 };
+
+/** Resposta de GET /reconciliation/counts. */
+export interface Counts {
+  suggestions: number;
+  pending: number;
+  awaitingApproval: number;
+  divergent: number;
+  reconciled: number;
+  ignored: number;
+}
