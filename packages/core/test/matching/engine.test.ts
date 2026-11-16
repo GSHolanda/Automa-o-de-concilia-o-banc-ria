@@ -405,6 +405,36 @@ describe('propriedades gerais', () => {
     expect(matches).toEqual([]);
   });
 
+  it('não concilia sozinho o candidato que sobra depois de uma rejeição humana', () => {
+    const b = bank();
+    const l1 = ledger();
+    const l2 = ledger();
+    const { matches } = reconcile({
+      bank: [b],
+      ledger: [l1, l2],
+      rejectedPairs: new Set([pairKey([b.id], [l1.id])]),
+      rules: rules(),
+    });
+    expect(matches).toEqual([
+      expect.objectContaining({ decision: 'suggest', ambiguous: true, bankIds: [b.id], ledgerIds: [l2.id] }),
+    ]);
+  });
+
+  it('aplica a mesma cautela na regra de identificador', () => {
+    const b = bank({ identifiers: ['4512'] });
+    const l1 = ledger({ identifiers: ['4512'] });
+    const l2 = ledger({ identifiers: ['4512'] });
+    const { matches } = reconcile({
+      bank: [b],
+      ledger: [l1, l2],
+      rejectedPairs: new Set([pairKey([b.id], [l1.id])]),
+      rules: rules(),
+    });
+    expect(matches).toEqual([
+      expect.objectContaining({ decision: 'suggest', ruleCode: 'ID_VALOR', ambiguous: true, ledgerIds: [l2.id] }),
+    ]);
+  });
+
   it('produz o mesmo resultado para qualquer ordem de entrada', () => {
     const bankItems = [
       bank({ identifiers: ['7001'], amountCents: 12000 }),

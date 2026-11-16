@@ -223,3 +223,9 @@ Importação (`src/modules/imports/`):
   `ledgerEntriesOf(batchId)`.
 - Possível duplicidade na importação já gera `matches` `ignored`/`suggested` com `divergence='duplicate'`.
 - E6 pronta: `/settings`, `/company`, cadastros, `/modules`, `/license`, `/onboarding`.
+- E8 pronta (`src/modules/reconciliation/{queries,decisions,run,routes}.ts`, `src/modules/dashboard/routes.ts`).
+  Consulta reutilizável: `queryReconItems(db, tenantId, filters: ReconItemFilters, {limit, cursor?}) → {items: ReconItemView[],
+  nextCursor?}` com `reconItemFiltersSchema` (sem `side` devolve os dois lados). Situação derivada do item:
+  `pending|divergent|reconciled|ignored|awaiting_approval`. Par desfeito é tratado como rejeitado. A categoria de uma
+  classificação fica em `matches.category_id`. Utilitários de teste em `test/helpers/reconciliation.ts`.
+- Motor 1.1.0: item com candidato rejeitado por pessoa não é conciliado sozinho; o candidato restante vira sugestão.

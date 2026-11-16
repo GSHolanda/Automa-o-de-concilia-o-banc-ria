@@ -39,19 +39,22 @@ Modelo e esforço são os informados pelo ambiente. Custo só aparece quando há
 | 3 (E6) | configuração por empresa | sonnet (solicitado) | medium | Configurações, cadastros, módulos, licença, onboarding | 30 testes novos; integrado | não |
 | 3 (E7) | fila e importação | opus (solicitado) | high | Fila com repetição e idempotência; importação OFX/CSV/XLSX | 24 testes novos; API total 107 passando | não |
 | 4 (telas) | acesso, auditoria, plataforma, configurações, implantação | sonnet (solicitado) | medium | 3 tarefas de telas | build do web passa; sem teste contra a API ainda | não |
+| 3 (E8) | conciliação e revisão | claude-opus-5-5 | high | Execução do motor, decisões, aprovação em duas etapas, painel | 29 testes novos; API total 144 passando | não |
+| 4 (telas) | importação | claude-sonnet-5-5 | medium | Lista, nova importação em passos, detalhe | build do web passa | não |
+| 7 (demo) | arquivos fictícios | claude-haiku-5-5 | low | Gerador determinístico de OFX, CSV e XLSX | 8 testes passando | não |
+| 3 (motor) | ajuste após achado da E8 | orquestrador | xhigh | Candidato restante após rejeição humana vira sugestão | core 173 passando | — |
 Modelo "solicitado": o ambiente aceitou o parâmetro na delegação. Confirmação do ambiente obtida em 16/11: as chamadas
 de opus, sonnet e haiku foram enviadas à API como `claude-opus-5-5`, `claude-sonnet-5-5` e `claude-haiku-5-5`.
 Os agentes de `.claude/agents/` passaram a ser reconhecidos após o reinício do processo da sessão.
-Consumo informado pelo ambiente por subagente: operação 88 mil tokens; base web 120 mil; E5 208 mil; E6 151 mil; E7 266 mil; telas 120 + 129 + 145 mil.
+Consumo informado pelo ambiente por subagente: operação 88 mil tokens; base web 120 mil; E5 208 mil; E6 151 mil; E7 266 mil; telas 120 + 129 + 145 + 133 mil; E8 295 mil; demo 133 mil.
 
 Custo real da sessão do orquestrador até este ponto, informado pelo ambiente: US$ 16,60.
 
 ## Próximos passos (fila de trabalho)
 Qualquer sessão pode continuar daqui lendo `CLAUDE.md`, este arquivo e as duas especificações.
 
-1. Em andamento: E8 conciliação e revisão (`dev-complexo`); telas de importação (`dev-intermediario`);
-   arquivos fictícios de demonstração em `apps/api/src/demo` (`dev-simples`).
-2. Depois da E8: E9 exportação (`dev-intermediario`); E10 integrações (`dev-complexo`, em cópia isolada);
+1. Concluídos: E8, telas de importação, arquivos fictícios de demonstração.
+2. Em andamento: E9 exportação (`dev-intermediario`); E10 integrações (`dev-complexo`, em cópia isolada);
    telas de conciliação, painel e aprovações (`dev-intermediario`).
 3. Em seguida: telas de relatórios, integrações, tokens de API e notificações (`dev-intermediario`);
    comando `demo:seed` que cria a empresa de demonstração, importa os arquivos e executa a conciliação (`dev-intermediario`).

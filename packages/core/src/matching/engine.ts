@@ -14,7 +14,7 @@ import type {
 } from './types';
 
 /** Muda sempre que o comportamento do motor muda; fica gravada em cada execução. */
-export const ENGINE_VERSION = '1.0.0';
+export const ENGINE_VERSION = '1.1.0';
 
 const WEIGHTS = { amount: 0.35, date: 0.15, identifier: 0.2, description: 0.1, uniqueness: 0.2 };
 const DESCRIPTION_MATCH_THRESHOLD = 0.5;
@@ -54,6 +54,11 @@ class Engine {
   private readonly used = new Set<string>();
   /** Itens usados ou citados em alguma sugestão: não podem mais ser conciliados automaticamente. */
   private readonly claimed = new Set<string>();
+  /**
+   * Itens que tinham um candidato já rejeitado por uma pessoa. O candidato que sobra não é conciliado
+   * sozinho: a rejeição mostra que havia dúvida, então o restante também passa por revisão.
+   */
+  private readonly rejectionTouched = new Set<string>();
   readonly matches: ProposedMatch[] = [];
 
   constructor(
@@ -83,6 +88,15 @@ class Engine {
 
   private isRejected(bankIds: string[], ledgerIds: string[]): boolean {
     return this.rejected.has(pairKey(bankIds, ledgerIds));
+  }
+
+  private noteRejection(a: ReconItem, b: ReconItem): void {
+    this.rejectionTouched.add(a.id);
+    this.rejectionTouched.add(b.id);
+  }
+
+  private needsReview(a: ReconItem, b: ReconItem): boolean {
+    return this.rejectionTouched.has(a.id) || this.rejectionTouched.has(b.id);
   }
 
   private free(item: ReconItem): boolean {
@@ -196,7 +210,11 @@ class Engine {
         for (const l of index.get(identifier) ?? []) {
           if (seen.has(l.id)) continue;
           seen.add(l.id);
-          if (!sameSign(b.amountCents, l.amountCents) || this.isRejected([b.id], [l.id])) continue;
+          if (!sameSign(b.amountCents, l.amountCents)) continue;
+          if (this.isRejected([b.id], [l.id])) {
+            this.noteRejection(b, l);
+            continue;
+          }
           add(edges, b.id, l);
           add(reverse, l.id, b);
           if (b.amountCents === l.amountCents) {
@@ -215,11 +233,16 @@ class Engine {
         const identifier = sharedIdentifier(b, only, minIdentifierLength);
         const days = Math.abs(diffDays(only.date, b.date));
         if (days <= maxDays) {
+          const review = this.needsReview(b, only);
+          const decision = this.rules.autoConfirm.byIdentifier && !review ? 'auto' : 'suggest';
           this.push(
-            this.pair('identifier', 'ID_VALOR', this.rules.autoConfirm.byIdentifier ? 'auto' : 'suggest', b, only, {
+            this.pair('identifier', 'ID_VALOR', decision, b, only, {
               dateScale: maxDays,
               competitors: 1,
-              explanation: `Mesmo identificador (${identifier}) e mesmo valor; correspondência única.`,
+              ambiguous: review,
+              explanation: review
+                ? `Mesmo identificador (${identifier}) e mesmo valor; outro candidato já foi rejeitado, exige revisão.`
+                : `Mesmo identificador (${identifier}) e mesmo valor; correspondência única.`,
             }),
           );
         } else {
@@ -285,7 +308,11 @@ class Engine {
     for (const b of this.bank) {
       if (this.used.has(b.id)) continue;
       for (const l of byAmount.get(b.amountCents) ?? []) {
-        if (Math.abs(diffDays(l.date, b.date)) > tolerance || this.isRejected([b.id], [l.id])) continue;
+        if (Math.abs(diffDays(l.date, b.date)) > tolerance) continue;
+        if (this.isRejected([b.id], [l.id])) {
+          this.noteRejection(b, l);
+          continue;
+        }
         const forward = edges.get(b.id);
         if (forward) forward.push(l);
         else edges.set(b.id, [l]);
@@ -316,11 +343,15 @@ class Engine {
       const enabled = corroborated
         ? this.rules.autoConfirm.byAmountDateReference
         : this.rules.autoConfirm.byUniqueAmountDate;
+      const review = this.needsReview(b, l);
       this.push(
-        this.pair('amount_date', ruleCode, enabled ? 'auto' : 'suggest', b, l, {
+        this.pair('amount_date', ruleCode, enabled && !review ? 'auto' : 'suggest', b, l, {
           dateScale: tolerance,
           competitors: 1,
-          explanation: corroborated
+          ambiguous: review,
+          explanation: review
+            ? 'Mesmo valor dentro da tolerância de data; outro candidato já foi rejeitado, exige revisão.'
+            : corroborated
             ? 'Mesmo valor e mesma data, com descrição coincidente; candidato único.'
             : `Mesmo valor, datas com ${days} dia(s) de diferença; candidato único dentro da tolerância.`,
         }),

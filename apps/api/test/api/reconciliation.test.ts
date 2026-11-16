@@ -20,8 +20,17 @@ let analyst: ApiClient & { userId: string };
 let accountA: TestBankAccount;
 
 /** Ids das transações e lançamentos de janeiro da conta A. */
-const jan: Record<string, string> = {};
+const jan = {} as Ids;
 let janRunId: string;
+
+type Ids = Record<'b1' | 'b2' | 'b3' | 'b4' | 'b5' | 'b6' | 'l1' | 'l2' | 'l3' | 'l4' | 'l5' | 'l6' | 'l7' | 'l8', string>;
+
+/** Guarda os ids na ordem das linhas: b1, b2… para o extrato; l1, l2… para os lançamentos. */
+function name(target: Ids, prefix: 'b' | 'l', rows: { id: string }[]): void {
+  rows.forEach((row, index) => {
+    (target as Record<string, string>)[`${prefix}${index + 1}`] = row.id;
+  });
+}
 
 beforeAll(async () => {
   app = await buildTestApp();
@@ -52,7 +61,7 @@ describe('motor de conciliação de ponta a ponta', () => {
       { date: '2024-01-12', amount: '980.00', memo: 'PIX RECEBIDO CLIENTE BETA NF 7788' },
       { date: '2024-01-15', amount: '-35.90', memo: 'TARIFA PACOTE SERVICOS' },
     ]);
-    [jan.b1, jan.b2, jan.b3, jan.b4] = bank.map((row) => row.id as string);
+    name(jan, 'b', bank);
     expect(bank[3].kind).toBe('fee');
 
     const ledger = await importLedger(app, admin, [
@@ -61,7 +70,7 @@ describe('motor de conciliação de ponta a ponta', () => {
       { date: '10/01/2024', description: 'PAGAMENTO FORNECEDOR YARA', amount: '-320,00', account: 'CC-A' },
       { date: '12/01/2024', description: 'RECEBIMENTO CLIENTE BETA', document: '7788', amount: '950,00', account: 'CC-A' },
     ]);
-    [jan.l1, jan.l2, jan.l3, jan.l4] = ledger.map((row) => row.id as string);
+    name(jan, 'l', ledger);
 
     const run = await runReconciliation(app, admin, accountA.id, '2024-01-01', '2024-01-31');
     janRunId = run.id;
@@ -341,9 +350,34 @@ describe('transferências internas', () => {
   });
 });
 
+describe('possível duplicidade da importação', () => {
+  it('a execução não descarta a decisão pendente e aceitar marca a transação como ignorada', async () => {
+    const accountG = await createBankAccount(tenant.tenantId, { name: 'Conta G', accountNumber: '77777-7' });
+    const [original] = await importStatement(app, admin, accountG, [
+      { date: '2024-06-03', amount: '-77.00', memo: 'COMPRA PAPELARIA', fitId: 'DUP-1' },
+    ]);
+    const [suspect] = await importStatement(app, admin, accountG, [
+      { date: '2024-06-03', amount: '-77.00', memo: 'COMPRA PAPELARIA', fitId: 'DUP-2' },
+    ]);
+    expect(suspect.duplicate_suspect).toBe(true);
+    expect(await itemStatus(admin, 'bank', suspect.id)).toBe('divergent');
+
+    const run = await runReconciliation(app, admin, accountG.id, '2024-06-01', '2024-06-30');
+    expect(run.stats.bankItems).toBe(1);
+    const [duplicate] = await matchesWith(admin, suspect.id);
+    expect(duplicate).toMatchObject({ status: 'suggested', type: 'ignored', divergence: 'duplicate' });
+    expect(await itemStatus(admin, 'bank', suspect.id)).toBe('divergent');
+
+    const accepted = await analyst.post(`/reconciliation/matches/${duplicate.id}/accept`, { note: 'Duplicada no banco' });
+    expect(accepted.status).toBe(200);
+    expect(await itemStatus(admin, 'bank', suspect.id)).toBe('ignored');
+    expect(await itemStatus(admin, 'bank', original.id)).toBe('pending');
+  });
+});
+
 describe('conciliação manual, ignorar e classificar', () => {
   let accountD: TestBankAccount;
-  const d: Record<string, string> = {};
+  const d = {} as Ids;
 
   beforeAll(async () => {
     accountD = await createBankAccount(tenant.tenantId, { name: 'Conta D', accountNumber: '44444-4', externalRef: 'CC-D' });
@@ -355,7 +389,7 @@ describe('conciliação manual, ignorar e classificar', () => {
       { date: '2024-04-25', amount: '-45.00', memo: 'IOF COMPRA EXTERIOR' },
       { date: '2024-04-26', amount: '-60.00', memo: 'SERVICO AVULSO' },
     ]);
-    [d.b1, d.b2, d.b3, d.b4, d.b5, d.b6] = bank.map((row) => row.id as string);
+    name(d, 'b', bank);
     const ledger = await importLedger(app, admin, [
       { date: '04/04/2024', description: 'FORNECEDOR ALFA', amount: '-700,00', account: 'CC-D' },
       { date: '04/04/2024', description: 'FORNECEDOR BETA', amount: '-500,00', account: 'CC-D' },
@@ -366,7 +400,7 @@ describe('conciliação manual, ignorar e classificar', () => {
       { date: '28/04/2024', description: 'TAXA AVULSA', amount: '-10,00', account: 'CC-D' },
       { date: '25/04/2024', description: 'RECEITA AVULSA', amount: '50,00', account: 'CC-D' },
     ]);
-    [d.l1, d.l2, d.l3, d.l4, d.l5, d.l6, d.l7, d.l8] = ledger.map((row) => row.id as string);
+    name(d, 'l', ledger);
   });
 
   it('1:N sem diferença dispensa observação', async () => {
@@ -520,7 +554,7 @@ describe('CA-12: aprovação em duas etapas', () => {
   let secondManager: ApiClient & { userId: string };
   let ownAnalyst: ApiClient & { userId: string };
   let account: TestBankAccount;
-  const f: Record<string, string> = {};
+  const f = {} as Ids;
 
   beforeAll(async () => {
     own = await createTenant({ label: 'aprovacao' });
@@ -534,13 +568,13 @@ describe('CA-12: aprovação em duas etapas', () => {
       { date: '2024-05-06', amount: '-250.00', memo: 'PAGAMENTO MANUTENCAO' },
       { date: '2024-05-10', amount: '1000.00', memo: 'RECEBIMENTO CLIENTE NF 5555' },
     ]);
-    [f.b1, f.b2, f.b3] = bank.map((row) => row.id as string);
+    name(f, 'b', bank);
     const ledger = await importLedger(app, ownAdmin, [
       { date: '02/05/2024', description: 'SERVICO PRESTADO', amount: '-800,00', account: 'CC-F' },
       { date: '06/05/2024', description: 'MANUTENCAO PREDIAL', amount: '-250,00', account: 'CC-F' },
       { date: '10/05/2024', description: 'RECEBIMENTO CLIENTE', document: '5555', amount: '990,00', account: 'CC-F' },
     ]);
-    [f.l1, f.l2, f.l3] = ledger.map((row) => row.id as string);
+    name(f, 'l', ledger);
   });
 
   it('sem o módulo ativo a configuração não pode ser ligada', async () => {
