@@ -12,6 +12,7 @@ import {
   batchView,
   BATCH_SELECT,
   findBankAccount,
+  assertFileNotPurged,
   findBatch,
   findProfile,
   IMPORT_JOB_TYPE,
@@ -134,6 +135,7 @@ const rejectionsQuery = z.object({
 const previewQuery = z.object({ sheetName: z.string().trim().min(1).max(100).optional() });
 
 async function previewOf(db: Db, batch: BatchRow, sheetName?: string): Promise<Record<string, unknown>> {
+  assertFileNotPurged(batch, 'gerar a prévia');
   const content = await loadBatchFile(db, batch.tenant_id, batch.id);
   if (!content) throw notFound('O arquivo original não está mais disponível.');
   const account = batch.bank_account_id ? await findBankAccount(db, batch.tenant_id, batch.bank_account_id) : null;
@@ -413,6 +415,7 @@ export const routes: RouteDefinition[] = [
     body: reprocessBody,
     handler: async ({ db, tenantId, auth, params, body, audit }) => {
       const batch = await findBatch(db, tenantId, params.id, true);
+      assertFileNotPurged(batch, 'reprocessar a importação');
       if (!['completed', 'completed_with_errors', 'failed'].includes(batch.status)) {
         throw conflict('Só é possível reprocessar importações concluídas ou falhas.', 'invalid_status', {
           status: batch.status,
@@ -524,6 +527,7 @@ export const routes: RouteDefinition[] = [
     params: idParams,
     handler: async ({ db, tenantId, params, audit }) => {
       const batch = await findBatch(db, tenantId, params.id);
+      assertFileNotPurged(batch, 'baixá-lo');
       const content = await loadBatchFile(db, tenantId, batch.id);
       if (!content) throw notFound('O arquivo original não está mais disponível.');
       await audit({

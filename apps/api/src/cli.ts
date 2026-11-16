@@ -7,6 +7,10 @@ import { AppError } from './http/errors';
 import { DemoSeedError, seedDemo } from './demo/seed';
 import { verifyAuditChain } from './modules/audit/routes';
 import { createPlatformAdmin, provisionTenant } from './modules/tenancy/provisioning';
+import { parseMasterKey, rotateSecrets, SecretsRotationError } from './ops/secrets-rotate';
+import { TenantOpsError } from './ops/tenant-data';
+import { exportTenant } from './ops/tenant-export';
+import { purgeTenant } from './ops/tenant-purge';
 import { generateTemporaryPassword } from './security/password';
 
 const USAGE = `Uso: cli <comando> [opções]
@@ -22,6 +26,16 @@ Comandos:
       Cria uma empresa com licença, papéis, configurações padrão e o primeiro administrador.
   audit:verify --tenant <slug> | --platform
       Recalcula a cadeia de hashes da trilha de auditoria. Sai com código 2 se estiver quebrada.
+  secrets:rotate
+      Recifra todos os segredos de integração com a chave nova, em uma transação, com MIGRATION_DATABASE_URL.
+      Chave atual: SECRETS_MASTER_KEY. Nova: NEW_SECRETS_MASTER_KEY e NEW_SECRETS_KEY_VERSION (1 a 255).
+      Segredos já na versão nova são pulados. Depois, troque SECRETS_MASTER_KEY e SECRETS_KEY_VERSION e reinicie.
+  tenant:export --tenant <slug> --out <arquivo> [--include-files]
+      Exporta em NDJSON todos os dados da empresa (sem hashes de senha, segredos nem tokens), com
+      MIGRATION_DATABASE_URL. --include-files inclui os arquivos originais em base64. Não sobrescreve arquivo.
+  tenant:purge --tenant <slug> --confirm <slug>
+      Elimina definitivamente todos os dados de uma empresa ARQUIVADA, inclusive origem e auditoria,
+      em uma transação com MIGRATION_DATABASE_URL. Irreversível: exporte e faça backup antes.
   demo:seed
       Monta a empresa fictícia "demo" (Comércio Exemplo Ltda) com usuários, contas, importações e conciliação.
       A senha dos quatro usuários vem de DEMO_PASSWORD (obrigatória). Se a empresa já existir, não altera nada.
@@ -49,6 +63,48 @@ async function dbMigrate(): Promise<void> {
     log: (message) => console.log(message),
   });
   console.log(`Migrações aplicadas: ${result.applied.length}; já existentes: ${result.skipped.length}.`);
+}
+
+function ownerUrl(): string {
+  const connectionString = process.env.MIGRATION_DATABASE_URL;
+  if (!connectionString) {
+    throw new CliError('Defina MIGRATION_DATABASE_URL com o papel dono do esquema: a operação cruza o isolamento entre empresas.');
+  }
+  return connectionString;
+}
+
+async function secretsRotate(): Promise<void> {
+  const version = Number(process.env.NEW_SECRETS_KEY_VERSION);
+  if (!process.env.NEW_SECRETS_KEY_VERSION || !Number.isInteger(version)) {
+    throw new CliError('Defina NEW_SECRETS_KEY_VERSION (inteiro de 1 a 255) para a chave nova.');
+  }
+  await rotateSecrets({
+    connectionString: ownerUrl(),
+    currentKey: parseMasterKey(process.env.SECRETS_MASTER_KEY, 'SECRETS_MASTER_KEY'),
+    newKey: parseMasterKey(process.env.NEW_SECRETS_MASTER_KEY, 'NEW_SECRETS_MASTER_KEY'),
+    newVersion: version,
+    log: (line) => console.log(line),
+  });
+  console.log(`Agora defina SECRETS_MASTER_KEY com a chave nova e SECRETS_KEY_VERSION=${version}, e reinicie a API e o trabalhador.`);
+}
+
+async function tenantExport(options: Options): Promise<void> {
+  const result = await exportTenant({
+    connectionString: ownerUrl(),
+    slug: required(options, 'tenant'),
+    out: required(options, 'out'),
+    includeFiles: options['include-files'] === true,
+  });
+  console.log(`Exportação concluída: ${result.rows} registro(s) de ${Object.keys(result.tables).length} tabela(s).`);
+}
+
+async function tenantPurge(options: Options): Promise<void> {
+  await purgeTenant({
+    connectionString: ownerUrl(),
+    slug: required(options, 'tenant'),
+    confirm: required(options, 'confirm'),
+    log: (line) => console.log(line),
+  });
 }
 
 async function withPool<T>(fn: (pool: ReturnType<typeof createPool>, config: ReturnType<typeof loadConfig>) => Promise<T>) {
@@ -165,6 +221,9 @@ async function run(argv: string[]): Promise<number> {
       active: { type: 'boolean' },
       tenant: { type: 'string' },
       platform: { type: 'boolean' },
+      out: { type: 'string' },
+      confirm: { type: 'string' },
+      'include-files': { type: 'boolean' },
     },
     strict: true,
   });
@@ -177,6 +236,15 @@ async function run(argv: string[]): Promise<number> {
       return 0;
     case 'tenant:create':
       await createTenant(values);
+      return 0;
+    case 'secrets:rotate':
+      await secretsRotate();
+      return 0;
+    case 'tenant:export':
+      await tenantExport(values);
+      return 0;
+    case 'tenant:purge':
+      await tenantPurge(values);
       return 0;
     case 'demo:seed':
       await demoSeed();
@@ -192,7 +260,10 @@ async function run(argv: string[]): Promise<number> {
 run(process.argv.slice(2)).then(
   (code) => process.exit(code),
   (error: unknown) => {
-    if (error instanceof CliError || error instanceof DemoSeedError || error instanceof ConfigError || error instanceof AppError) {
+    if (error instanceof CliError ||
+      error instanceof SecretsRotationError ||
+      error instanceof TenantOpsError ||
+      error instanceof DemoSeedError || error instanceof ConfigError || error instanceof AppError) {
       console.error(error.message);
     } else {
       console.error(error);
