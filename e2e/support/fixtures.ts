@@ -63,7 +63,19 @@ export async function loginAs(page: Page, persona: Persona): Promise<void> {
   await expect(page.getByRole('navigation', { name: 'Menu principal' })).toBeVisible();
 }
 
+/**
+ * Sai pela própria interface, como um usuário: o aplicativo cancela as consultas em andamento antes de encerrar a
+ * sessão. Apagar só o cookie deixaria consultas periódicas chegando ao servidor sem sessão (401 legítimo).
+ */
 export async function logout(page: Page): Promise<void> {
+  const userButton = page.locator('button.usuario-botao');
+  if (await userButton.isVisible().catch(() => false)) {
+    await userButton.click();
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes('/api/v1/auth/logout')),
+      page.getByRole('menuitem', { name: 'Sair' }).click(),
+    ]);
+  }
   await page.context().clearCookies();
   await page.goto('/entrar');
 }
