@@ -9,11 +9,13 @@ export interface SecretModalProps {
   title: string;
   description: string;
   label?: string;
+  /** Texto de rodapé; o padrão vale para senha temporária. */
+  footnote?: string;
   onClose: () => void;
 }
 
 /** Exibe uma credencial gerada uma única vez, com botão de copiar. Não fecha por Esc nem clique fora. */
-export function SecretModal({ secret, title, description, label = 'Senha temporária', onClose }: SecretModalProps) {
+export function SecretModal({ secret, title, description, label = 'Senha temporária', footnote, onClose }: SecretModalProps) {
   const toast = useToast();
   const [copied, setCopied] = useState(false);
 
@@ -61,7 +63,7 @@ export function SecretModal({ secret, title, description, label = 'Senha tempor�
         {secret}
       </code>
       <p className="texto-suave" style={{ marginTop: 'var(--e3)' }}>
-        Esta senha não será exibida novamente. Quem a receber deverá trocá-la no primeiro acesso.
+        {footnote ?? 'Esta senha não será exibida novamente. Quem a receber deverá trocá-la no primeiro acesso.'}
       </p>
     </Modal>
   );
