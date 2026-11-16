@@ -59,10 +59,10 @@ Premissas que não mudam:
 | API (`apps/api`) | 303 testes passando (28 arquivos), banco PostgreSQL real em cada execução |
 | Ponta a ponta (`e2e`, Playwright) | 28 testes passando, 3 execuções seguidas sem falha |
 | Interface (`apps/web`) | todas as telas implementadas; build e verificação de tipos limpos |
-| Documentação | `docs/01` a `docs/09`, README, especificações, manuais |
+| Documentação | `docs/01` a `docs/11`, README, especificações, manuais, `revisao-de-seguranca.md` |
 | Revisão de segurança | concluída: `docs/revisao-de-seguranca.md`, 14 achados (0 críticos, 3 altos, 5 médios, 6 baixos); nenhum vazamento de dados entre empresas pelas rotas |
 | Correções da revisão | os 14 achados corrigidos; pendências parciais listadas na seção 8 |
-| Falta | `docs/10` e `docs/11`, seção "Situação" do plano |
+| Falta | Commit e push (seção 9, item 5). Documentação da seção 9 concluída |
 
 Repositório: `https://github.com/GSHolanda/Automa-o-de-concilia-o-banc-ria`, ramo `claude/ecstatic-davinci-ypsppf`.
 Nenhum pull request foi aberto (abrir só se o titular pedir).
@@ -165,11 +165,11 @@ Comandos da CLI (`pnpm cli <comando>`): `db:migrate`, `platform:create-admin`, `
 ## 9. Trabalho restante, em ordem
 
 1. Concluído: os 14 achados da revisão de segurança foram corrigidos (detalhes no histórico e na seção 8).
-2. `docs/10-testes-e-resultados.md`: mapear cada critério CA-01…CA-28 de `docs/01-requisitos.md` para o arquivo de
+2. **Concluído** (16/11/2026). `docs/10-testes-e-resultados.md`: mapear cada critério CA-01…CA-28 de `docs/01-requisitos.md` para o arquivo de
    teste que o cobre e registrar os números reais das suítes (rodar todas antes de escrever).
-3. `docs/11-limitacoes-riscos-dependencias.md`: consolidar as seções 7 e 8 deste handoff, os itens "não
+3. **Concluído** (16/11/2026). `docs/11-limitacoes-riscos-dependencias.md`: consolidar as seções 7 e 8 deste handoff, os itens "não
    configuráveis" do `docs/07` e os achados não corrigidos da revisão.
-4. Preencher a seção "Situação" de `docs/plano-de-implementacao.md` e atualizar o índice do `README.md`.
+4. **Concluído** (16/11/2026). Preencher a seção "Situação" de `docs/plano-de-implementacao.md` e atualizar o índice do `README.md`.
 5. Rodar todas as suítes, fazer commit (regra da seção 0) e push.
 
 ## 10. Como trabalhar neste repositório

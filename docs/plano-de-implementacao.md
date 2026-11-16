@@ -100,4 +100,19 @@ Situações que a especificação implica e que merecem teste dedicado:
 
 ## Situação
 
-Atualizada ao final de cada etapa.
+Atualizada ao final de cada etapa. Última atualização: 16/11/2026, com a execução completa das suítes (horários em UTC). Números das suítes: core 204 testes (11 arquivos), API 303 (28 arquivos), e2e 28 testes. Os testes são por suíte; não há contagem separada por etapa, por isso cada linha aponta os arquivos que a cobrem.
+
+| Etapa | Implementado | Testado | Depende de serviço externo |
+|---|---|---|---|
+| E1 Fundação e primitivas | Sim | `packages/core`: 204 testes passando (dinheiro, datas, texto) | Não |
+| E2 Leitores e preparação | Sim (OFX, CSV, XLSX) | `packages/core/test/parsers/*`, dentro dos 204 do core; `apps/api/test/api/imports*.test.ts` | Não |
+| E3 Motor de conciliação | Sim (motor 1.2.0) | `packages/core/test/matching/engine.test.ts`, dentro dos 204 do core | Não |
+| E4 Banco de dados | Sim (migrações 0001 a 0007) | `apps/api/test/db/*` (isolamento, imutabilidade, migrações), dentro dos 303 da API | Não |
+| E5 API: base, autenticação, autorização, auditoria | Sim | `apps/api/test/api/auth.test.ts`, `access.test.ts`, `unit/password.test.ts`, dentro dos 303 da API | Não |
+| E6 Configuração por empresa | Sim | `apps/api/test/api/config.test.ts`, dentro dos 303 da API; `packages/core/test/access.test.ts` | Não |
+| E7 Fila e importação | Sim | `apps/api/test/api/imports.test.ts`, `jobs.test.ts`, `imports-xlsx-limits.test.ts`, dentro dos 303 da API | Não |
+| E8 Conciliação e revisão | Sim | `apps/api/test/api/reconciliation*.test.ts`, dentro dos 303 da API; e2e `03` e `04` | Não |
+| E9 Exportação | Sim (CSV, XLSX, PDF) | `apps/api/test/api/exports.test.ts`, dentro dos 303 da API; e2e `05` | Não |
+| E10 Integrações | Sim (webhook, SMTP, conector REST, IA, tokens de API, notificações) | `apps/api/test/api/integrations.test.ts`, `notifications.test.ts`, `ledger-api.test.ts`, `ai.test.ts`, dentro dos 303 da API; e2e `10` | Sim: webhook, SMTP, conector REST e IA só testados contra servidores locais; chamada real não verificada |
+| E11 Interface | Sim (todas as telas da especificação) | Build e typecheck limpos; e2e: 28 testes passando | Não |
+| E12 Ponta a ponta, operação e documentação | Sim (e2e, CLI de operação, documentos 01 a 11) | e2e: 28 testes passando; `apps/api/test/ops/*` dentro dos 303 da API | Sim: Docker e Compose não executados (sintaxe validada); backup e restauração executados só localmente |

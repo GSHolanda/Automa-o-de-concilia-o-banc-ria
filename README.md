@@ -109,8 +109,10 @@ O e2e usa `TEST_ADMIN_DATABASE_URL` (padrão `postgres://postgres:postgres@local
 | [`docs/07-manual-de-personalizacao.md`](docs/07-manual-de-personalizacao.md) | Como personalizar regras, perfis e modelos por empresa | Disponível |
 | [`docs/08-operacao-backup-recuperacao.md`](docs/08-operacao-backup-recuperacao.md) | Operação, backup e recuperação | Disponível |
 | [`docs/09-seguranca-lgpd.md`](docs/09-seguranca-lgpd.md) | Segurança e LGPD (controles técnicos) | Disponível |
-| `docs/10-testes-e-resultados.md` | Testes e resultados | A escrever |
-| `docs/11-limitacoes.md` | Limitações conhecidas | A escrever |
+| [`docs/10-testes-e-resultados.md`](docs/10-testes-e-resultados.md) | Como rodar as suítes, resultados, cobertura de CA-01 a CA-28 | Disponível |
+| [`docs/11-limitacoes-riscos-dependencias.md`](docs/11-limitacoes-riscos-dependencias.md) | Limitações, riscos operacionais e dependências externas não verificadas | Disponível |
+| [`docs/revisao-de-seguranca.md`](docs/revisao-de-seguranca.md) | Revisão de segurança e isolamento: 14 achados e correções | Disponível |
+| [`docs/HANDOFF.md`](docs/HANDOFF.md) | Passagem de trabalho entre agentes: estado, decisões e pendências | Disponível |
 | [`docs/especificacao-backend.md`](docs/especificacao-backend.md) | Contrato das etapas E5 a E10 | Disponível |
 | [`docs/especificacao-frontend.md`](docs/especificacao-frontend.md) | Telas da interface | Disponível |
 | [`docs/orquestracao.md`](docs/orquestracao.md) | Política de delegação e registro de execução | Disponível |

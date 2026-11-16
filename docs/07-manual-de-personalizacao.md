@@ -534,7 +534,7 @@ O conteúdo do modelo (título, colunas, rodapé) é uma configuração guardada
 | **Tamanho mínimo da senha** (caracteres) | Vale para senhas novas e trocas; as atuais continuam até serem trocadas | 10 | 8 a 64 |
 | **Manter arquivos originais indefinidamente** / **Prazo de retenção** (dias) | Quanto tempo guardar o arquivo original de cada importação | Indefinidamente | 30 a 3.650 |
 
-**Importante sobre a retenção:** a tela grava o prazo, mas, nesta versão do código, **não há rotina que apague os arquivos** ao fim do prazo (veja `08-operacao-backup-recuperacao.md`). O expurgo precisa ser decidido e executado pela equipe técnica. Os dados já importados e a trilha de auditoria não são apagados pelo prazo (a auditoria não permite exclusão).
+**Importante sobre a retenção:** o trabalhador apaga uma vez por dia os arquivos originais de importações processadas há mais dias que o prazo configurado (veja `08-operacao-backup-recuperacao.md`). O lote, o hash do arquivo, as estatísticas, os dados importados e a trilha de auditoria continuam guardados; só o arquivo original some, e baixá-lo, pré-visualizá-lo ou reprocessá-lo passa a ser recusado com aviso de arquivo expurgado.
 
 Outras garantias que não se configuram, mas valem para toda empresa: cada empresa só enxerga os próprios dados; segredos de integração são cifrados e nunca devolvidos; a auditoria é encadeada.
 
@@ -580,7 +580,6 @@ Verificado no código desta versão. Estes pontos exigiriam desenvolvimento ou a
 - **Outros provedores de IA**: hoje só há Anthropic na lista de provedores.
 - **Conteúdo dos modelos de relatório pela tela** (título, colunas, rodapé): só pela API. O relatório de **Lançamentos a criar** tem formato fixo.
 - **Aplicar outro modelo de plano de contas pelo botão** da tela: o botão aplica só o `plano-de-contas-basico`. Outros modelos são aplicados pela API.
-- **Expurgo automático de arquivos originais** conforme o prazo de retenção: o prazo é gravado, mas não há rotina que apague os arquivos nesta versão.
 - **Idioma e formato regional**: a interface é em português do Brasil, com valores em reais e datas AAAA-MM-DD por trás. Não há troca de idioma.
 - **Tema escuro** e outros aspectos visuais além da cor principal e do logotipo.
 - **Autenticação única (SSO), segundo fator (2FA) e integração com diretório de usuários**: não há. O acesso é por e-mail e senha.
