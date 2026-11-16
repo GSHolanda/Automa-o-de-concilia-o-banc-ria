@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   decodeOfxBuffer,
   decodeText,
@@ -143,7 +143,23 @@ describe('arquivos fictícios de demonstração', () => {
     expect(somaCartoes).toBe(360_000);
   });
 
-  it('chamar buildDemoFiles duas vezes devolve conteúdo idêntico', async () => {
+  it('chamar buildDemoFiles duas vezes devolve conteúdo idêntico, mesmo com outro relógio', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2024-03-01T10:00:00Z'));
+      const first = await loadFiles();
+      vi.setSystemTime(new Date('2026-11-16T18:45:33Z'));
+      const second = await loadFiles();
+      expect(second.map((file) => file.name)).toEqual(first.map((file) => file.name));
+      for (const [index, file] of first.entries()) {
+        expect(Buffer.compare(file.content, second[index]?.content ?? Buffer.alloc(0))).toBe(0);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('o conteúdo não depende do relógio em nenhuma geração', async () => {
     const first = await loadFiles();
     const second = await loadFiles();
     expect(second.map((file) => file.name)).toEqual(first.map((file) => file.name));

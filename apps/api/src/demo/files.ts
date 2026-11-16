@@ -309,8 +309,27 @@ async function ledgerFile(): Promise<DemoFile> {
     name: 'lancamentos-2024-01.xlsx',
     kind: 'ledger',
     account: null,
-    content: Buffer.from(buffer),
+    content: fixZipTimestamps(Buffer.from(buffer)),
   };
+}
+
+/**
+ * Zera o horário das entradas do zip (campos DOS de data e hora), que o exceljs grava com o relógio atual.
+ * Assinaturas: cabeçalho local PK\x03\x04 (hora no deslocamento 10) e diretório central PK\x01\x02 (deslocamento 12).
+ */
+function fixZipTimestamps(zip: Buffer): Buffer {
+  const DOS_TIME = 12 << 11; // 12:00
+  const DOS_DATE = ((2024 - 1980) << 9) | (1 << 5) | 31; // 31/01/2024
+  const out = Buffer.from(zip);
+  for (let i = 0; i + 4 <= out.length; i += 1) {
+    if (out[i] !== 0x50 || out[i + 1] !== 0x4b) continue;
+    const sig = out.readUInt16LE(i + 2);
+    const offset = sig === 0x0403 ? 10 : sig === 0x0201 ? 12 : -1;
+    if (offset < 0 || i + offset + 4 > out.length) continue;
+    out.writeUInt16LE(DOS_TIME, i + offset);
+    out.writeUInt16LE(DOS_DATE, i + offset + 2);
+  }
+  return out;
 }
 
 /** Gera os quatro arquivos de demonstração. Determinístico: mesma saída a cada chamada. */
