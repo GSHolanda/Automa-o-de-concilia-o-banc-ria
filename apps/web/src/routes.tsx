@@ -24,6 +24,7 @@ import { ImportacaoDetalhePage } from './features/importacoes/ImportacaoDetalheP
 import { ImportacoesPage } from './features/importacoes/ImportacoesPage';
 import { NovaImportacaoPage } from './features/importacoes/NovaImportacaoPage';
 import { ConciliacaoPage } from './features/conciliacao/ConciliacaoPage';
+import { RelatoriosPage } from './features/relatorios/RelatoriosPage';
 import { EmConstrucao } from './pages/EmConstrucao';
 
 export interface AppRoute {
@@ -52,7 +53,7 @@ export const APP_ROUTES: AppRoute[] = [
   { path: '/importacoes/:id', title: 'Importação', element: <ImportacaoDetalhePage />, permission: 'imports.view' },
   { path: '/conciliacao', title: 'Conciliação', element: <ConciliacaoPage />, permission: 'reconciliation.view', menu: true },
   { path: '/aprovacoes', title: 'Aprovações', element: <AprovacoesPage />, permission: 'reconciliation.approve', module: 'approvals', menu: true },
-  { path: '/relatorios', title: 'Relatórios', element: stub('Relatórios'), permission: 'exports.create', menu: true },
+  { path: '/relatorios', title: 'Relatórios', element: <RelatoriosPage />, permission: 'exports.create', menu: true },
   { path: '/auditoria', title: 'Auditoria', element: <AuditoriaPage />, permission: 'audit.view', menu: true },
   { path: '/implantacao', title: 'Implantação', element: <ImplantacaoPage />, permission: 'settings.manage', menu: true },
   { path: '/plataforma/empresas', title: 'Empresas', element: <EmpresasPage />, platform: true, menu: true },

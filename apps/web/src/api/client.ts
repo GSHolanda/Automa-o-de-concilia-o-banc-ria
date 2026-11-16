@@ -110,6 +110,21 @@ async function json<T>(path: string, options: RequestOptions): Promise<T> {
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
+async function saveResponse(response: Response, fallbackName: string): Promise<void> {
+  const blob = await response.blob();
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+  const name = match?.[1] ? decodeURIComponent(match[1]) : fallbackName;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = name;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 export const api = {
   get: <T>(path: string, query?: Record<string, QueryValue>, signal?: AbortSignal, skipUnauthorized = false) =>
     json<T>(path, { query, signal, skipUnauthorized }),
@@ -122,19 +137,11 @@ export const api = {
   upload: <T>(path: string, form: FormData, method = 'POST') => json<T>(path, { method, form }),
   /** Baixa um arquivo e dispara o salvamento no navegador. */
   async download(path: string, query?: Record<string, QueryValue>, fallbackName = 'arquivo'): Promise<void> {
-    const response = await send(path, { query });
-    const blob = await response.blob();
-    const disposition = response.headers.get('Content-Disposition') ?? '';
-    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
-    const name = match?.[1] ? decodeURIComponent(match[1]) : fallbackName;
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = name;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+    await saveResponse(await send(path, { query }), fallbackName);
+  },
+  /** Baixa um arquivo gerado por POST com corpo JSON (exportações). */
+  async downloadPost(path: string, body: unknown, fallbackName = 'arquivo'): Promise<void> {
+    await saveResponse(await send(path, { method: 'POST', body }), fallbackName);
   },
 };
 
