@@ -1,7 +1,9 @@
 import type { ModuleKey, PermissionKey } from '@concilia/core/shared';
 import type { ReactNode } from 'react';
 import { RegrasPage } from './features/configuracoes/RegrasPage';
-import { AprovacoesPage } from './features/configuracoes/AprovacoesPage';
+import { AprovacoesPage as AprovacoesConfigPage } from './features/configuracoes/AprovacoesPage';
+import { AprovacoesPage } from './features/aprovacoes/AprovacoesPage';
+import { PainelPage } from './features/painel/PainelPage';
 import { SegurancaPage } from './features/configuracoes/SegurancaPage';
 import { PerfisImportacaoPage } from './features/perfis-importacao/PerfisImportacaoPage';
 import { ImplantacaoPage } from './features/implantacao/ImplantacaoPage';
@@ -43,12 +45,12 @@ const stub = (title: string) => <EmConstrucao title={title} />;
 
 /** Rotas de negócio. Outras equipes substituem `element` pela tela real da sua área. */
 export const APP_ROUTES: AppRoute[] = [
-  { path: '/', title: 'Painel', element: stub('Painel'), permission: 'dashboard.view', menu: true },
+  { path: '/', title: 'Painel', element: <PainelPage />, permission: 'dashboard.view', menu: true },
   { path: '/importacoes', title: 'Importações', element: <ImportacoesPage />, permission: 'imports.view', menu: true },
   { path: '/importacoes/nova', title: 'Nova importação', element: <NovaImportacaoPage />, permission: 'imports.create' },
   { path: '/importacoes/:id', title: 'Importação', element: <ImportacaoDetalhePage />, permission: 'imports.view' },
   { path: '/conciliacao', title: 'Conciliação', element: stub('Conciliação'), permission: 'reconciliation.view', menu: true },
-  { path: '/aprovacoes', title: 'Aprovações', element: stub('Aprovações'), permission: 'reconciliation.approve', module: 'approvals', menu: true },
+  { path: '/aprovacoes', title: 'Aprovações', element: <AprovacoesPage />, permission: 'reconciliation.approve', module: 'approvals', menu: true },
   { path: '/relatorios', title: 'Relatórios', element: stub('Relatórios'), permission: 'exports.create', menu: true },
   { path: '/auditoria', title: 'Auditoria', element: <AuditoriaPage />, permission: 'audit.view', menu: true },
   { path: '/implantacao', title: 'Implantação', element: <ImplantacaoPage />, permission: 'settings.manage', menu: true },
@@ -82,7 +84,7 @@ const SETTINGS_DEFS: SettingsDef[] = [
 /** Telas prontas de /configuracoes (chave = `path` de SETTINGS_DEFS). */
 const SETTINGS_ELEMENTS: Record<string, ReactNode> = {
   regras: <RegrasPage />,
-  aprovacoes: <AprovacoesPage />,
+  aprovacoes: <AprovacoesConfigPage />,
   seguranca: <SegurancaPage />,
   'perfis-importacao': <PerfisImportacaoPage />,
   usuarios: <UsuariosPage />,

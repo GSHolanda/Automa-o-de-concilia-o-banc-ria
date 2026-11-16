@@ -1,4 +1,6 @@
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+import { api } from '../api/client';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { APP_ROUTES } from '../routes';
@@ -31,6 +33,15 @@ function useMenu(): MenuEntry[] {
 export function AppShell() {
   const { me, logout, readOnly, can } = useAuth();
   const menu = useMenu();
+  // Contagem de aprovações pendentes no menu (só para quem pode ver o painel e aprovar).
+  const showApprovals = can('reconciliation.approve') && can('dashboard.view') && !me?.isPlatformAdmin;
+  const approvals = useQuery({
+    queryKey: ['approvals-count'],
+    enabled: showApprovals,
+    refetchInterval: 60_000,
+    queryFn: () => api.get<{ pendingApprovals: number }>('/dashboard'),
+  });
+  const pendingApprovals = approvals.data?.pendingApprovals ?? 0;
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
@@ -77,6 +88,9 @@ export function AppShell() {
             <li key={item.to}>
               <NavLink to={item.to} end={item.end} className={({ isActive }) => (isActive ? 'menu-item ativo' : 'menu-item')}>
                 {item.label}
+                {item.to === '/aprovacoes' && pendingApprovals > 0 && (
+                  <span className="badge badge-info" style={{ marginLeft: 8 }} aria-label={`${pendingApprovals} pendentes`}>{pendingApprovals}</span>
+                )}
               </NavLink>
             </li>
           ))}
