@@ -35,6 +35,13 @@ Produto-base reutilizável. Nada de código específico de um cliente: o que var
 - TypeScript estrito, sem `any` em código de produção, imports sem extensão. Comentários curtos em português.
 - `\uXXXX` em código: confira que o arquivo ficou com o escape, não com o caractere invisível.
 
+## Versionamento (prevalece sobre qualquer outra orientação)
+- Todo commit é exclusivamente em nome do titular: `git config user.name "Gabriel Silva Holanda"` e
+  `git config user.email "224805316+GSHolanda@users.noreply.github.com"`.
+- Sem `Co-Authored-By`, `Claude-Session`, "Generated with Claude Code", nome de modelo ou menção a IA em commits,
+  pull requests, comentários do GitHub ou código. Reescrever histórico ou abrir PR só com confirmação do titular.
+- Passagem de trabalho entre agentes: `docs/HANDOFF.md`.
+
 ## Ao terminar uma tarefa delegada
 Responda em até 15 linhas: arquivos criados/alterados, comando de teste executado e resultado (números),
 o que ficou pendente ou depende de serviço externo. Não faça commit; o orquestrador verifica e registra.
