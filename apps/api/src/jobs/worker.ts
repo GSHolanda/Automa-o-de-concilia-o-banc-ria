@@ -4,6 +4,7 @@ import { performance } from 'node:perf_hooks';
 import { writeAudit } from '../audit/audit';
 import { withContext, type Db } from '../db/context';
 import { DELIVER_JOB_TYPE, emitNotification } from '../modules/notifications/service';
+import { MAINTENANCE_CHECK_INTERVAL_MS, scheduleMaintenanceJobs } from './maintenance';
 import { retryDelayMs } from './queue';
 import { getJobHandler } from './registry';
 import { WORKER_ACTOR, type JobDeps, type JobRecord } from './types';
@@ -181,6 +182,7 @@ export function startWorker(deps: JobDeps, options: { workerId?: string } = {}):
   let timer: NodeJS.Timeout | undefined;
   let current: Promise<void> = Promise.resolve();
   let lastRelease = 0;
+  let lastMaintenance = 0;
 
   const tick = async (): Promise<void> => {
     let claimed = 0;
@@ -189,6 +191,16 @@ export function startWorker(deps: JobDeps, options: { workerId?: string } = {}):
         lastRelease = Date.now();
         const released = await releaseStaleJobs(deps);
         if (released > 0) deps.log.warn({ released }, 'trabalhos travados devolvidos à fila');
+      }
+      if (Date.now() - lastMaintenance >= MAINTENANCE_CHECK_INTERVAL_MS) {
+        lastMaintenance = Date.now();
+        // Falha no agendamento não interrompe a fila; nova tentativa no próximo intervalo.
+        await scheduleMaintenanceJobs(deps).then(
+          (scheduled) => {
+            if (scheduled.created > 0) deps.log.info(scheduled, 'trabalhos de manutenção agendados');
+          },
+          (error: unknown) => deps.log.error({ err: error }, 'falha ao agendar trabalhos de manutenção'),
+        );
       }
       const jobs = await claimJobs(deps, workerId, deps.config.workerConcurrency);
       claimed = jobs.length;

@@ -1,5 +1,5 @@
 import type { Db } from '../../db/context';
-import { notFound } from '../../http/errors';
+import { gone, notFound } from '../../http/errors';
 import type { FileFormat, SourceKind } from './files';
 
 export const IMPORT_JOB_TYPE = 'import.process';
@@ -51,6 +51,7 @@ export interface BatchRow {
   created_at: Date;
   updated_at: Date;
   processed_at: Date | null;
+  file_purged_at: Date | null;
   cursor_at: string;
   job_id: string | null;
   job_status: string | null;
@@ -85,6 +86,7 @@ export function batchView(row: BatchRow) {
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
     processedAt: row.processed_at?.toISOString() ?? null,
+    filePurgedAt: row.file_purged_at?.toISOString() ?? null,
     job: row.job_id
       ? { id: row.job_id, status: row.job_status, attempts: row.job_attempts, lastError: row.job_last_error }
       : null,
@@ -100,6 +102,18 @@ export async function findBatch(db: Db, tenantId: string, id: string, forUpdate 
   const row = result.rows[0];
   if (!row) throw notFound('Importação não encontrada.');
   return row;
+}
+
+/** Recusa com 410 quando o arquivo original do lote foi expurgado pela política de retenção. */
+export function assertFileNotPurged(batch: Pick<BatchRow, 'file_purged_at'>, action: string): void {
+  if (!batch.file_purged_at) return;
+  const date = batch.file_purged_at.toISOString().slice(0, 10);
+  throw gone(
+    `O arquivo original foi expurgado em ${date} pela política de retenção de arquivos da empresa; não é possível ${action}. ` +
+      'O lote, o hash e as estatísticas continuam disponíveis.',
+    'file_purged',
+    { filePurgedAt: batch.file_purged_at.toISOString() },
+  );
 }
 
 export async function loadBatchFile(db: Db, tenantId: string, batchId: string): Promise<Buffer | null> {

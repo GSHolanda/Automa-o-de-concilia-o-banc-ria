@@ -1,4 +1,5 @@
 import { importProcessHandler } from '../modules/imports/process';
+import { purgeImportFilesHandler } from '../modules/imports/retention';
 import { connectorPullHandler } from '../modules/integrations/pull';
 import { notificationDeliverHandler } from '../modules/notifications/deliver';
 import { reconciliationRunHandler } from '../modules/reconciliation/run';
@@ -10,4 +11,6 @@ export const jobHandlers: Readonly<Record<string, JobHandler>> = {
   'reconciliation.run': reconciliationRunHandler,
   'notification.deliver': notificationDeliverHandler,
   'connector.pull': connectorPullHandler,
+  // Mesmo texto de PURGE_FILES_JOB_TYPE (jobs/maintenance).
+  'maintenance.purge_import_files': purgeImportFilesHandler,
 };

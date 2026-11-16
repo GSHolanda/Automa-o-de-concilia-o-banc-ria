@@ -21,6 +21,8 @@ export const forbidden = (message = 'Você não tem permissão para esta operaç
 export const notFound = (message = 'Registro não encontrado.') => new AppError(404, 'not_found', message);
 export const conflict = (message: string, code = 'conflict', details?: unknown) =>
   new AppError(409, code, message, details);
+/** Recurso que existiu e foi removido de propósito (ex.: arquivo expurgado pela retenção). */
+export const gone = (message: string, code = 'gone', details?: unknown) => new AppError(410, code, message, details);
 export const unprocessable = (message: string, code = 'unprocessable', details?: unknown) =>
   new AppError(422, code, message, details);
 
