@@ -24,7 +24,7 @@ O produto trata dados de conciliação bancária. Dados de pessoas aparecem nos 
 | **IP e agente de navegador (user agent)** da sessão | `sessions.ip`, `sessions.user_agent` (`0001_base.sql`; gravados em `apps/api/src/modules/auth/routes.ts`) | Listar e revogar sessões; investigar acesso indevido. |
 | IP, agente de navegador, id e rótulo do autor, e valores antes/depois das alterações | `audit_log` (`0001_base.sql`; `apps/api/src/audit/audit.ts`; login em `modules/auth/routes.ts`) | Trilha de auditoria. A criação de usuário grava nome e e-mail em `after`. |
 | **Nomes de pessoas e empresas em descrições** de extrato e de lançamentos, documento, referência | `bank_transactions` e `ledger_entries`: `description_raw`, `description_norm`, `document`, `reference`, `raw` (`0003_data.sql`) | Conciliar o extrato com o razão. O produto não separa "nome de pessoa" do restante do texto: o que o banco escreve na descrição é guardado. |
-| **Favorecido/contraparte** | `ledger_entries.counterparty`, e `bank_transactions.counterparty` quando o extrato traz (`0003_data.sql`) | Conciliação e relatórios. |
+| **Favorecido/contraparte** | `ledger_entries.counterparty` (`0003_data.sql`); no extrato bancário não há coluna própria, e o nome do favorecido, quando existe, vem dentro da descrição ou de `bank_transactions.raw` | Conciliação e relatórios. |
 | Conteúdo integral dos **arquivos importados** (OFX, CSV, XLSX, JSON) | `import_files.content` (`0003_data.sql`) | Evidência da origem e reprocessamento. Sujeito à retenção (seção 7). |
 | Linhas rejeitadas, na forma original | `import_rejections.raw` (`0003_data.sql`) | Permitir corrigir a origem. |
 | E-mails de destinatários de avisos | `notification_rules.target` (`0002_config.sql`) e `notification_deliveries.payload` | Enviar avisos por e-mail. A entrega guarda o texto enviado. |
@@ -134,7 +134,7 @@ node apps/api/dist/cli.js tenant:purge --tenant <slug> --confirm <slug>
 
 Ressalvas que precisam ser conhecidas antes de usar:
 
-1. **A eliminação não apaga todos os rastros da empresa.** Registros da trilha da plataforma (cadeia com `tenant_id` nulo) que citam nome, slug e CNPJ da empresa, por exemplo da criação e da alteração da empresa, permanecem.
+1. **A eliminação não apaga todos os rastros da empresa.** Registros da trilha da plataforma (cadeia com `tenant_id` nulo) que citam nome, slug e CNPJ da empresa, por exemplo `platform.tenant_created` e as alterações da empresa (`before`/`after` incluem o cadastro), permanecem (`apps/api/src/modules/platform/routes.ts`, `modules/tenancy/provisioning.ts`).
 2. **A eliminação trava as gravações de todas as empresas.** Desabilitar gatilhos exige travar as tabelas até o fim da transação; gravações de qualquer empresa nessas tabelas esperam. Há `lock_timeout` de 30 s: se não conseguir as travas, a eliminação desiste sem alterar nada. Execute em janela de baixo uso.
 3. **Backups e exportações já feitos continuam com os dados.** Descarte-os conforme a política da instalação.
 
@@ -166,7 +166,7 @@ Bases legais e prazos de resposta são decisão jurídica da controladora.
 ## 9. Segurança das integrações
 
 - **Bloqueio de endereços privados (SSRF).** `safeFetch` só aceita HTTPS (HTTP somente com `ALLOW_PRIVATE_INTEGRATION_HOSTS` em desenvolvimento), resolve o DNS e recusa destinos em faixas privadas, loopback, link-local, multicast e reservadas, IPv4 e IPv6, inclusive IPv4 mapeado. A conexão usa o endereço já conferido (contra DNS rebinding), não segue redirecionamento, tem tempo limite e limite de tamanho da resposta. Endereços de metadados de nuvem são recusados sempre, mesmo com a liberação (`apps/api/src/integrations/http.ts`).
-- **Assinatura de webhooks.** Cabeçalho `x-concilia-signature: sha256=<HMAC-SHA256(segredo, timestamp.corpo)>`, com `x-concilia-timestamp`, `x-concilia-event` e `x-concilia-delivery`. O receptor valida a assinatura e rejeita timestamps antigos (`apps/api/src/integrations/webhook.ts`; contrato em `docs/04-api-e-conectores.md`, seção 7). O segredo do webhook fica no cofre.
+- **Assinatura de webhooks.** Cabeçalho `x-concilia-signature: sha256=<HMAC-SHA256(segredo, timestamp.corpo)>`, com `x-concilia-timestamp`, `x-concilia-event` e `x-concilia-delivery`. O receptor valida a assinatura; o Concilia não impõe janela de validade do timestamp, e rejeitar entregas antigas é recomendação ao receptor (`apps/api/src/integrations/webhook.ts`; contrato em `docs/04-api-e-conectores.md`, seção 7). O segredo do webhook fica no cofre.
 - **Tokens de API.** Prefixo `ck_`, 256 bits de aleatoriedade; só o SHA-256 e o prefixo ficam no banco; escopos, validade e revogação (`api_tokens`; `apps/api/src/security/tokens.ts`, `modules/api-tokens/routes.ts`). Exibidos uma única vez, na criação.
 - **Verificação honesta.** A integração só fica `verified` após chamada real bem-sucedida (`docs/04-api-e-conectores.md`, seção 9); falha do provedor remove a situação `verified`.
 - **Planilhas.** Fórmulas não são avaliadas na leitura; na exportação, células iniciadas por `=`, `+`, `-` ou `@` são neutralizadas (`docs/02-arquitetura.md`, seção 4).
@@ -178,7 +178,7 @@ Para evitar falsa expectativa, o produto **não** oferece hoje:
 - **Segundo fator de autenticação** (TOTP, SMS, chave de segurança).
 - **Login único** (SSO, SAML, OIDC) nem diretório externo.
 - **Cifra em repouso gerida pela aplicação**, além dos segredos de integração. Descrições, valores, nomes, arquivos importados e a trilha ficam em texto no banco. A proteção do disco, do banco e dos backups (cifra de volume, cifra do `pg_dump`) depende da infraestrutura. O `ops/backup.sh` não cifra o dump.
-- **Varredura de malware** nos arquivos enviados. Há validação de formato, limite de tamanho (`MAX_UPLOAD_BYTES`) e de linhas, e as fórmulas não são avaliadas, mas o conteúdo não passa por antivírus.
+- **Varredura de malware** nos arquivos enviados. Há validação de formato, limite de tamanho (`MAX_UPLOAD_MB`) e de linhas (`MAX_IMPORT_ROWS`), e as fórmulas não são avaliadas, mas o conteúdo não passa por antivírus.
 - **Registro de consentimento** nem gestão de bases legais.
 - **Busca ou eliminação por titular** (ver seção 8).
 - **Cofre externo de chaves** (KMS/HSM) e **registro externo** do `headHash` da trilha.
