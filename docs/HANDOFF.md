@@ -60,8 +60,9 @@ Premissas que não mudam:
 | Ponta a ponta (`e2e`, Playwright) | 28 testes passando, 3 execuções seguidas sem falha |
 | Interface (`apps/web`) | todas as telas implementadas; build e verificação de tipos limpos |
 | Documentação | `docs/01` a `docs/09`, README, especificações, manuais |
-| Em andamento ao fechar este handoff | revisão única de segurança (relatório em `docs/revisao-de-seguranca.md`) |
-| Falta | aplicar a revisão, `docs/10` e `docs/11`, seção "Situação" do plano |
+| Revisão de segurança | concluída: `docs/revisao-de-seguranca.md`, 14 achados (0 críticos, 3 altos, 5 médios, 6 baixos); nenhum vazamento de dados entre empresas pelas rotas |
+| Em andamento | correção dos achados altos e médios (ver seção 9) |
+| Falta | `docs/10` e `docs/11`, seção "Situação" do plano |
 
 Repositório: `https://github.com/GSHolanda/Automa-o-de-concilia-o-banc-ria`, ramo `claude/ecstatic-davinci-ypsppf`.
 Nenhum pull request foi aberto (abrir só se o titular pedir).
@@ -155,9 +156,10 @@ Comandos da CLI (`pnpm cli <comando>`): `db:migrate`, `platform:create-admin`, `
 
 ## 9. Trabalho restante, em ordem
 
-1. Ler `docs/revisao-de-seguranca.md` (se não existir, a revisão não terminou: rodar uma revisão de segurança e
-   isolamento com o escopo descrito em `docs/orquestracao.md`, item 4 da fila). Corrigir achados críticos e altos
-   com teste que reproduza cada um; médios conforme custo; registrar os demais em `docs/11`.
+1. Corrigir os achados de `docs/revisao-de-seguranca.md`, cada um com teste que reproduza o defeito antes da
+   correção: os altos 1 (motor concilia par "único" só porque o concorrente ficou fora do período/conta), 2 (XLSX
+   pequeno esgota a memória) e 3 (segredo enviado a novo destino sem ser informado de novo) e os médios 4 a 8.
+   Os baixos podem ser corrigidos se forem simples; os não corrigidos vão para `docs/11`.
 2. `docs/10-testes-e-resultados.md`: mapear cada critério CA-01…CA-28 de `docs/01-requisitos.md` para o arquivo de
    teste que o cobre e registrar os números reais das suítes (rodar todas antes de escrever).
 3. `docs/11-limitacoes-riscos-dependencias.md`: consolidar as seções 7 e 8 deste handoff, os itens "não
