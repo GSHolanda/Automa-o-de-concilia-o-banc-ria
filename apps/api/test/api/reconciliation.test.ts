@@ -593,7 +593,8 @@ describe('CA-12: aprovação em duas etapas', () => {
   });
 
   it('aceitar sugestão divergente vai para aprovação e só concilia ao aprovar', async () => {
-    await runReconciliation(app, ownAdmin, account.id, '2024-05-01', '2024-05-31');
+    // Só o recebimento com NF entra no período; os demais ficam para as decisões manuais abaixo.
+    await runReconciliation(app, ownAdmin, account.id, '2024-05-10', '2024-05-31');
     const [divergent] = await matchesWith(ownAdmin, f.b3, 'status=suggested');
     expect(divergent).toMatchObject({ divergence: 'amount' });
     const accepted = await ownAnalyst.post(`/reconciliation/matches/${divergent.id}/accept`, {});
