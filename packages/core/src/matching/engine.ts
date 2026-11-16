@@ -14,7 +14,7 @@ import type {
 } from './types';
 
 /** Muda sempre que o comportamento do motor muda; fica gravada em cada execução. */
-export const ENGINE_VERSION = '1.1.0';
+export const ENGINE_VERSION = '1.2.0';
 
 const WEIGHTS = { amount: 0.35, date: 0.15, identifier: 0.2, description: 0.1, uniqueness: 0.2 };
 const DESCRIPTION_MATCH_THRESHOLD = 0.5;
@@ -35,6 +35,11 @@ function round4(value: number): number {
 
 function sameSign(a: number, b: number): boolean {
   return (a > 0 && b > 0) || (a < 0 && b < 0);
+}
+
+/** Item vinculado a uma conta só pode corresponder a item da mesma conta ou sem conta. */
+function sameAccount(a: ReconItem, b: ReconItem): boolean {
+  return a.accountId === null || b.accountId === null || a.accountId === b.accountId;
 }
 
 function sharedIdentifier(a: ReconItem, b: ReconItem, minLength: number): string | null {
@@ -60,15 +65,26 @@ class Engine {
    */
   private readonly rejectionTouched = new Set<string>();
   readonly matches: ProposedMatch[] = [];
+  /** Extrato da execução mais os itens de contexto: lado bancário das fases que decidem por unicidade. */
+  private readonly matchBank: ReconItem[];
+  /** Itens de contexto: contam como concorrentes, nunca entram em resultado nas fases com lançamentos. */
+  private readonly contextIds: ReadonlySet<string>;
+  /** Itens de contexto que não vieram como extrato de outra conta: não entram em transferência. */
+  private readonly transferContextIds: ReadonlySet<string>;
 
   constructor(
     private readonly bank: ReconItem[],
     private readonly ledger: ReconItem[],
     private readonly otherBank: ReconItem[],
+    private readonly context: ReconItem[],
     input: ReconInput,
   ) {
     this.rules = input.rules;
     this.rejected = input.rejectedPairs ?? new Set();
+    this.matchBank = [...bank, ...context].sort(byDateThenId);
+    this.contextIds = new Set(context.map((item) => item.id));
+    const other = new Set(otherBank.map((item) => item.id));
+    this.transferContextIds = new Set(context.filter((item) => !other.has(item.id)).map((item) => item.id));
   }
 
   // -- utilitários ---------------------------------------------------------
@@ -131,9 +147,15 @@ class Engine {
     );
   }
 
-  private push(match: ProposedMatch): void {
+  private push(match: ProposedMatch, context: ReadonlySet<string> = this.contextIds): void {
     if (match.decision === 'suggest' && match.confidence < this.rules.suggestions.minConfidence) return;
     const ids = [...match.bankIds, ...match.ledgerIds];
+    if (ids.some((id) => context.has(id))) {
+      // Resultado que envolve item de contexto não é gravado, mas os demais itens ficam reservados:
+      // não podem mais ser conciliados automaticamente nesta execução.
+      for (const id of ids) if (!context.has(id)) this.claimed.add(id);
+      return;
+    }
     if (match.decision === 'auto') for (const id of ids) this.used.add(id);
     for (const id of ids) this.claimed.add(id);
     this.matches.push(match);
@@ -203,14 +225,14 @@ class Engine {
       else map.set(key, [value]);
     };
 
-    for (const b of this.bank) {
+    for (const b of this.matchBank) {
       const seen = new Set<string>();
       for (const identifier of b.identifiers) {
         if (identifier.length < minIdentifierLength) continue;
         for (const l of index.get(identifier) ?? []) {
           if (seen.has(l.id)) continue;
           seen.add(l.id);
-          if (!sameSign(b.amountCents, l.amountCents)) continue;
+          if (!sameSign(b.amountCents, l.amountCents) || !sameAccount(b, l)) continue;
           if (this.isRejected([b.id], [l.id])) {
             this.noteRejection(b, l);
             continue;
@@ -225,7 +247,7 @@ class Engine {
       }
     }
 
-    for (const b of this.bank) {
+    for (const b of this.matchBank) {
       const exactCandidates = exact.get(b.id) ?? [];
       const only = exactCandidates[0];
 
@@ -305,10 +327,10 @@ class Engine {
 
     const edges = new Map<string, ReconItem[]>();
     const reverse = new Map<string, ReconItem[]>();
-    for (const b of this.bank) {
+    for (const b of this.matchBank) {
       if (this.used.has(b.id)) continue;
       for (const l of byAmount.get(b.amountCents) ?? []) {
-        if (Math.abs(diffDays(l.date, b.date)) > tolerance) continue;
+        if (Math.abs(diffDays(l.date, b.date)) > tolerance || !sameAccount(b, l)) continue;
         if (this.isRejected([b.id], [l.id])) {
           this.noteRejection(b, l);
           continue;
@@ -325,7 +347,7 @@ class Engine {
     // A unicidade é avaliada sobre o grafo completo da fase, antes de qualquer decisão.
     const unique: Array<[ReconItem, ReconItem]> = [];
     const ambiguous: ReconItem[] = [];
-    for (const b of this.bank) {
+    for (const b of this.matchBank) {
       const candidates = edges.get(b.id);
       if (!candidates || !this.free(b)) continue;
       const only = candidates[0];
@@ -392,6 +414,7 @@ class Engine {
         const difference = Math.abs(b.amountCents - l.amountCents);
         return (
           this.free(l) &&
+          sameAccount(b, l) &&
           sameSign(b.amountCents, l.amountCents) &&
           difference > 0 &&
           difference <= limit &&
@@ -452,6 +475,7 @@ class Engine {
       .filter(
         (other) =>
           this.free(other) &&
+          sameAccount(anchor, other) &&
           sameSign(anchor.amountCents, other.amountCents) &&
           Math.abs(other.amountCents) < Math.abs(anchor.amountCents) &&
           Math.abs(diffDays(other.date, anchor.date)) <= tolerance,
@@ -521,7 +545,10 @@ class Engine {
     if (!this.rules.transfers.enabled) return;
     const tolerance = this.rules.transfers.dateToleranceDays;
     const primary = new Set(this.bank.map((item) => item.id));
-    const all = [...this.bank, ...this.otherBank].filter((item) => this.free(item)).sort(byDateThenId);
+    const unique = new Map<string, ReconItem>();
+    for (const item of [...this.bank, ...this.otherBank, ...this.context]) if (!unique.has(item.id)) unique.set(item.id, item);
+    // Todas as arestas contam na unicidade, inclusive entre contas que não estão em conciliação.
+    const all = [...unique.values()].filter((item) => this.free(item)).sort(byDateThenId);
     const debits = all.filter((item) => item.amountCents < 0);
     const credits = all.filter((item) => item.amountCents > 0);
 
@@ -535,7 +562,6 @@ class Engine {
           credit.accountId === null ||
           -debit.amountCents !== credit.amountCents ||
           Math.abs(diffDays(debit.date, credit.date)) > tolerance ||
-          (!primary.has(debit.id) && !primary.has(credit.id)) ||
           (debit.kind !== 'internal_transfer' && credit.kind !== 'internal_transfer') ||
           this.isRejected([debit.id, credit.id], [])
         ) {
@@ -553,7 +579,9 @@ class Engine {
     const proposals: ProposedMatch[] = [];
     for (const debit of debits) {
       const candidates = edges.get(debit.id) ?? [];
-      for (const credit of candidates.slice(0, this.rules.suggestions.maxPerItem)) {
+      // Só se propõe par com uma ponta da conta em conciliação.
+      const proposable = candidates.filter((credit) => primary.has(debit.id) || primary.has(credit.id));
+      for (const credit of proposable.slice(0, this.rules.suggestions.maxPerItem)) {
         const competitors = Math.max(candidates.length, (reverse.get(credit.id) ?? []).length);
         const unique = competitors === 1;
         const strong = debit.kind === 'internal_transfer' && credit.kind === 'internal_transfer';
@@ -584,7 +612,7 @@ class Engine {
         });
       }
     }
-    for (const proposal of proposals) this.push(proposal);
+    for (const proposal of proposals) this.push(proposal, this.transferContextIds);
   }
 
   // -- fase 6: estornos ----------------------------------------------------
@@ -698,8 +726,12 @@ export function reconcile(input: ReconInput): ReconOutput {
   const bank = [...input.bank].sort(byDateThenId);
   const ledger = [...input.ledger].sort(byDateThenId);
   const otherBank = [...(input.otherAccountsBank ?? [])].sort(byDateThenId);
+  const inRun = new Set(bank.map((item) => item.id));
+  const context = [...new Map((input.bankContext ?? []).map((item) => [item.id, item])).values()]
+    .filter((item) => !inRun.has(item.id))
+    .sort(byDateThenId);
 
-  const engine = new Engine(bank, ledger, otherBank, input);
+  const engine = new Engine(bank, ledger, otherBank, context, input);
   engine.run();
 
   const byRule: ReconOutput['stats']['byRule'] = {};

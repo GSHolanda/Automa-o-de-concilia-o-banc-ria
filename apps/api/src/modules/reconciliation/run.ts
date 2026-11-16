@@ -102,15 +102,41 @@ async function loadInput(db: Db, run: RunRecord, rules: ReconRules) {
         [
           tenantId,
           run.bank_account_id,
-          addDays(run.period_start, -rules.transfers.dateToleranceDays),
-          addDays(run.period_end, rules.transfers.dateToleranceDays),
+          // O dobro da tolerância: o par de uma ponta na borda também é disputado por itens além dela.
+          addDays(run.period_start, -2 * rules.transfers.dateToleranceDays),
+          addDays(run.period_end, 2 * rules.transfers.dateToleranceDays),
         ],
+      )
+    : { rows: [] as SourceRow[] };
+
+  // Contexto: concorrentes fora do recorte. Um lançamento carregado fica a até `reach` dias da borda e
+  // disputa transações a até `reach` dias dele; por isso o contexto vai a 2 × reach além das bordas.
+  const reach = Math.max(window, rules.transfers.enabled ? rules.transfers.dateToleranceDays : 0);
+  const contextStart = addDays(run.period_start, -2 * reach);
+  const contextEnd = addDays(run.period_end, 2 * reach);
+  const sameAccount = await db.query<SourceRow>(
+    `SELECT ${BANK_COLUMNS} FROM bank_transactions t
+      WHERE t.tenant_id = $1 AND t.bank_account_id = $2 AND t.posted_date BETWEEN $3 AND $4
+        AND (t.posted_date < $5 OR t.posted_date > $6) AND ${FREE_BANK}`,
+    [tenantId, run.bank_account_id, contextStart, contextEnd, run.period_start, run.period_end],
+  );
+  // Lançamento sem conta pode ser de qualquer conta: transações de mesmo valor nas outras contas o disputam.
+  const unassignedAmounts = [
+    ...new Set(ledger.rows.filter((row) => row.bank_account_id === null).map((row) => row.amount_cents)),
+  ];
+  const otherAccounts = unassignedAmounts.length
+    ? await db.query<SourceRow>(
+        `SELECT ${BANK_COLUMNS} FROM bank_transactions t
+          WHERE t.tenant_id = $1 AND t.bank_account_id <> $2 AND t.posted_date BETWEEN $3 AND $4
+            AND t.amount_cents = ANY ($5::bigint[]) AND ${FREE_BANK}`,
+        [tenantId, run.bank_account_id, contextStart, contextEnd, unassignedAmounts],
       )
     : { rows: [] as SourceRow[] };
   return {
     bank: bank.rows.map((row) => toItem('bank', row)),
     ledger: ledger.rows.map((row) => toItem('ledger', row)),
     otherAccountsBank: other.rows.map((row) => toItem('bank', row)),
+    bankContext: [...sameAccount.rows, ...otherAccounts.rows].map((row) => toItem('bank', row)),
   };
 }
 
@@ -232,7 +258,7 @@ async function executeRun(context: JobContext): Promise<unknown> {
   const pairs = await knownPairs(
     db,
     tenantId,
-    [...input.bank, ...input.otherAccountsBank].map((item) => item.id),
+    [...input.bank, ...input.otherAccountsBank, ...input.bankContext].map((item) => item.id),
     input.ledger.map((item) => item.id),
   );
   const output = reconcile({ ...input, rejectedPairs: pairs.rejected, rules });
@@ -252,6 +278,7 @@ async function executeRun(context: JobContext): Promise<unknown> {
   const stats = {
     ...output.stats,
     otherAccountsBankItems: input.otherAccountsBank.length,
+    contextBankItems: input.bankContext.length,
     saved,
     discarded,
     alreadyOpen,

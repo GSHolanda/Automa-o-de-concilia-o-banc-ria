@@ -90,6 +90,12 @@ export interface ReconInput {
   ledger: readonly ReconItem[];
   /** Extratos pendentes de outras contas da empresa, usados só para transferências internas. */
   otherAccountsBank?: readonly ReconItem[];
+  /**
+   * Transações pendentes fora do recorte da execução (da própria conta além das bordas do período, ou de
+   * outras contas que disputam lançamentos sem conta). Contam como concorrentes na avaliação de unicidade,
+   * mas nunca são conciliadas nem recebem sugestão nesta execução.
+   */
+  bankContext?: readonly ReconItem[];
   /** Pares já rejeitados por pessoas; ver pairKey. */
   rejectedPairs?: ReadonlySet<string>;
   rules: ReconRules;

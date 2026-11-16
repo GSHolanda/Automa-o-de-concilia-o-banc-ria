@@ -500,3 +500,104 @@ describe('propriedades gerais', () => {
     expect(matches[0]?.explanation).toMatch(/identificador/i);
   });
 });
+
+describe('itens de contexto fora do recorte da execução', () => {
+  const involves = (matches: ProposedMatch[], id: string) =>
+    matches.filter((match) => [...match.bankIds, ...match.ledgerIds].includes(id));
+
+  it('não concilia sozinho quando a transação concorrente fica um dia além do fim do período', () => {
+    const inPeriod = bank({ date: '2024-03-31', amountCents: 50000, descriptionNorm: 'pix recebido cliente um' });
+    const outside = bank({ date: '2024-04-01', amountCents: 50000, descriptionNorm: 'pix recebido cliente dois' });
+    const entry = ledger({ date: '2024-04-01', amountCents: 50000, descriptionNorm: 'recebimento cliente dois' });
+    const { matches } = reconcile({ bank: [inPeriod], bankContext: [outside], ledger: [entry], rules: rules() });
+
+    expect(autos(matches)).toEqual([]);
+    expect(involves(matches, outside.id)).toEqual([]);
+    for (const match of matches) expect(match.ambiguous).toBe(true);
+  });
+
+  it('não concilia sozinho lançamento sem conta disputado por transação idêntica de outra conta', () => {
+    const inA = bank({ accountId: 'conta-1', amountCents: -100000, descriptionNorm: 'pagamento fornecedor' });
+    const inB = bank({ accountId: 'conta-2', amountCents: -100000, descriptionNorm: 'pagamento fornecedor' });
+    const entry = ledger({ accountId: null, amountCents: -100000, descriptionNorm: 'pagamento fornecedor' });
+    const { matches } = reconcile({ bank: [inA], bankContext: [inB], ledger: [entry], rules: rules() });
+
+    expect(autos(matches)).toEqual([]);
+    expect(involves(matches, inB.id)).toEqual([]);
+    expect(matches).toEqual([
+      expect.objectContaining({ decision: 'suggest', bankIds: [inA.id], ledgerIds: [entry.id], ambiguous: true }),
+    ]);
+  });
+
+  it('aplica a mesma cautela na regra de identificador', () => {
+    const inPeriod = bank({ date: '2024-03-28', identifiers: ['998877'] });
+    const outside = bank({ date: '2024-04-02', identifiers: ['998877'] });
+    const entry = ledger({ date: '2024-03-30', identifiers: ['998877'] });
+    const { matches } = reconcile({ bank: [inPeriod], bankContext: [outside], ledger: [entry], rules: rules() });
+
+    expect(autos(matches)).toEqual([]);
+    expect(involves(matches, outside.id)).toEqual([]);
+  });
+
+  it('transação de outra conta não disputa lançamento vinculado à conta em conciliação', () => {
+    const inA = bank({ accountId: 'conta-1' });
+    const inB = bank({ accountId: 'conta-2' });
+    const entry = ledger({ accountId: 'conta-1' });
+    const { matches } = reconcile({ bank: [inA], bankContext: [inB], ledger: [entry], rules: rules() });
+
+    expect(matches).toEqual([expect.objectContaining({ decision: 'auto', bankIds: [inA.id], ledgerIds: [entry.id] })]);
+  });
+
+  it('nunca concilia nem sugere item de contexto, mesmo sem concorrente', () => {
+    const outside = bank({ kind: 'fee', amountCents: -1500 });
+    const entry = ledger({ identifiers: ['4512'] });
+    const pairable = bank({ identifiers: ['4512'] });
+    const { matches, stats } = reconcile({ bank: [], bankContext: [outside, pairable], ledger: [entry], rules: rules() });
+
+    expect(matches).toEqual([]);
+    expect(stats.bankItems).toBe(0);
+  });
+
+  it('o lançamento que pertence ao item de contexto não é conciliado sozinho com outro', () => {
+    const inPeriod = bank({ date: '2024-03-31' });
+    const outside = bank({ date: '2024-04-04', identifiers: ['55443322'] });
+    const entry = ledger({ date: '2024-04-02', identifiers: ['55443322'] });
+    const { matches } = reconcile({ bank: [inPeriod], bankContext: [outside], ledger: [entry], rules: rules() });
+
+    expect(autos(matches)).toEqual([]);
+    expect(involves(matches, outside.id)).toEqual([]);
+  });
+
+  it('transferência: débito concorrente em uma terceira conta impede a conciliação automática', () => {
+    const debit = bank({ accountId: 'conta-1', amountCents: -50000, kind: 'internal_transfer' });
+    const credit = bank({ accountId: 'conta-2', amountCents: 50000, kind: 'internal_transfer' });
+    const rival = bank({ accountId: 'conta-3', amountCents: -50000, kind: 'internal_transfer' });
+    const { matches } = reconcile({
+      bank: [debit],
+      ledger: [],
+      otherAccountsBank: [credit, rival],
+      rules: rules({ autoConfirm: { ...DEFAULT_RECON_RULES.autoConfirm, internalTransfers: true } }),
+    });
+
+    expect(autos(matches)).toEqual([]);
+    expect(matches).toEqual([
+      expect.objectContaining({ type: 'internal_transfer', bankIds: [debit.id, credit.id].sort(), ambiguous: true }),
+    ]);
+  });
+
+  it('transferência: concorrente da própria conta fora do período impede a conciliação automática', () => {
+    const debit = bank({ accountId: 'conta-1', date: '2024-03-31', amountCents: -50000, kind: 'internal_transfer' });
+    const outside = bank({ accountId: 'conta-1', date: '2024-04-01', amountCents: -50000, kind: 'internal_transfer' });
+    const credit = bank({ accountId: 'conta-2', date: '2024-04-01', amountCents: 50000, kind: 'internal_transfer' });
+    const { matches } = reconcile({
+      bank: [debit],
+      bankContext: [outside],
+      ledger: [],
+      otherAccountsBank: [credit],
+      rules: rules({ autoConfirm: { ...DEFAULT_RECON_RULES.autoConfirm, internalTransfers: true } }),
+    });
+
+    expect(autos(matches)).toEqual([]);
+    expect(involves(matches, outside.id)).toEqual([]);
+  });
+});
