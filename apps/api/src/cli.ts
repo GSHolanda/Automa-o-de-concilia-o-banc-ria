@@ -4,6 +4,7 @@ import { withContext } from './db/context';
 import { migrate } from './db/migrate';
 import { createPool } from './db/pool';
 import { AppError } from './http/errors';
+import { DemoSeedError, seedDemo } from './demo/seed';
 import { verifyAuditChain } from './modules/audit/routes';
 import { createPlatformAdmin, provisionTenant } from './modules/tenancy/provisioning';
 import { generateTemporaryPassword } from './security/password';
@@ -21,6 +22,9 @@ Comandos:
       Cria uma empresa com licença, papéis, configurações padrão e o primeiro administrador.
   audit:verify --tenant <slug> | --platform
       Recalcula a cadeia de hashes da trilha de auditoria. Sai com código 2 se estiver quebrada.
+  demo:seed
+      Monta a empresa fictícia "demo" (Comércio Exemplo Ltda) com usuários, contas, importações e conciliação.
+      A senha dos quatro usuários vem de DEMO_PASSWORD (obrigatória). Se a empresa já existir, não altera nada.
 `;
 
 type Options = Record<string, string | boolean | undefined>;
@@ -104,6 +108,22 @@ async function createTenant(options: Options): Promise<void> {
   });
 }
 
+async function demoSeed(): Promise<void> {
+  const config = loadConfig();
+  const result = await seedDemo(config, process.env.DEMO_PASSWORD);
+  if (!result.created) {
+    console.log(`A empresa "demo" já existe (${result.tenantId}); nada foi alterado.`);
+    return;
+  }
+  console.log(`Empresa de demonstração criada (${result.tenantId}). Usuários: admin, gestor, analista, auditor @demo.exemplo.test`);
+  for (const item of result.imports) console.log(`Importação ${item.file}: ${item.status} ${JSON.stringify(item.stats)}`);
+  for (const item of result.accounts) {
+    console.log(
+      `${item.account}: ${item.autoMatched} automática(s), ${item.suggested} sugestão(ões), ${item.divergences} divergência(s) ${JSON.stringify(item.stats)}`,
+    );
+  }
+}
+
 async function auditVerify(options: Options): Promise<number> {
   const platform = options.platform === true;
   const slug = platform ? null : required(options, 'tenant');
@@ -158,6 +178,9 @@ async function run(argv: string[]): Promise<number> {
     case 'tenant:create':
       await createTenant(values);
       return 0;
+    case 'demo:seed':
+      await demoSeed();
+      return 0;
     case 'audit:verify':
       return auditVerify(values);
     default:
@@ -169,7 +192,7 @@ async function run(argv: string[]): Promise<number> {
 run(process.argv.slice(2)).then(
   (code) => process.exit(code),
   (error: unknown) => {
-    if (error instanceof CliError || error instanceof ConfigError || error instanceof AppError) {
+    if (error instanceof CliError || error instanceof DemoSeedError || error instanceof ConfigError || error instanceof AppError) {
       console.error(error.message);
     } else {
       console.error(error);
