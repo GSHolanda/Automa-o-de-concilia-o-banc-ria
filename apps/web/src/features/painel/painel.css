@@ -1,0 +1,29 @@
+.painel-filtros { display: flex; flex-wrap: wrap; gap: var(--e3); align-items: flex-end; margin-bottom: var(--e5); }
+.painel-filtros > * { flex: 1 1 160px; min-width: 0; }
+.painel-grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--e3); }
+.painel-quadro {
+  display: block; text-decoration: none; color: var(--cor-texto); background: var(--cor-superficie);
+  border: 1px solid var(--cor-borda); border-left-width: 4px; border-radius: var(--raio); padding: var(--e3) var(--e4);
+  min-height: 40px;
+}
+.painel-quadro:hover { background: var(--cor-fundo); }
+.painel-quadro:focus-visible { outline: 2px solid var(--cor-primaria); outline-offset: 2px; }
+.painel-quadro .rotulo { font-size: 0.8125rem; color: var(--cor-texto-suave); }
+.painel-quadro .qtd { font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.st-reconciled { border-left-color: var(--cor-sucesso); }
+.st-pending { border-left-color: var(--cor-alerta); }
+.st-divergent { border-left-color: var(--cor-perigo); }
+.st-ignored { border-left-color: var(--cor-neutro); }
+.st-awaitingApproval { border-left-color: var(--cor-info); }
+.painel-barra { display: flex; height: 16px; border-radius: 8px; overflow: hidden; background: var(--cor-neutro-fundo); margin: var(--e2) 0; }
+.painel-barra span { display: block; min-width: 2px; }
+.bg-reconciled { background: var(--cor-sucesso); }
+.bg-pending { background: var(--cor-alerta); }
+.bg-divergent { background: var(--cor-perigo); }
+.bg-ignored { background: var(--cor-neutro); }
+.bg-awaitingApproval { background: var(--cor-info); }
+.painel-legenda { display: flex; flex-wrap: wrap; gap: var(--e1) var(--e4); list-style: none; margin: 0; padding: 0; font-size: 0.8125rem; }
+.painel-legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: var(--e1); }
+.painel-lados { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--e4); }
+.painel-ind { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--e3); }
+.painel-ind .qtd { font-size: 1.5rem; font-weight: 600; }

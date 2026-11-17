@@ -82,6 +82,8 @@ E-mail único na instalação; cada usuário pertence a exatamente uma empresa (
 
 **Consequência.** A mesma pessoa em duas empresas precisa de dois e-mails. Vínculo de um usuário a várias empresas é evolução prevista (tabela de vínculos), registrada em limitações.
 
+**Risco aceito (revisão de segurança, achado 11).** Como o e-mail é único na instalação, `POST /users` com e-mail já usado em outra empresa responde 409 `email_taken`: um administrador consegue saber se um e-mail existe na instalação. Mitigação: limite de 20 tentativas de criação a cada 10 minutos por sessão, contando as recusadas. Eliminar o risco exige e-mail único por empresa com login por empresa, decisão de produto em aberto.
+
 ### ADR-04 Fila de trabalhos no PostgreSQL
 
 Tabela `jobs` com captura por `FOR UPDATE SKIP LOCKED`, chave de idempotência única por empresa e tipo, tentativas com espera exponencial, estado final `dead`. O trabalhador roda no mesmo processo da API (`WORKER_ENABLED=true`) ou em processo separado (`pnpm worker`).
@@ -134,7 +136,7 @@ Arquivos SQL numerados em `apps/api/migrations`. O executor registra nome e chec
 | Tema | Controle |
 |---|---|
 | Senhas | scrypt (N=2^17, r=8, p=1 em produção), sal aleatório por senha, comparação em tempo constante. |
-| Força bruta | Limite de requisições por IP nas rotas de autenticação; bloqueio temporário da conta após falhas sucessivas. |
+| Força bruta | Limite de requisições por IP e e-mail no login; espera crescente por conta e origem após falhas sucessivas (sem bloquear a conta inteira). |
 | Sessão | Ver ADR-09. Troca de senha encerra as demais sessões. |
 | Autorização | Catálogo de permissões no domínio; cada rota declara a permissão; papéis por empresa. |
 | Isolamento | Ver ADR-01. |

@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # A versão do pnpm vem do campo packageManager do package.json (não repetir aqui).
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm -r typecheck
+
+      - run: pnpm --filter @concilia/core test
+
+      - run: pnpm --filter @concilia/api test
+        env:
+          TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+      - run: pnpm --filter @concilia/web build
+
+  e2e:
+    # Testes ponta a ponta no navegador: sobem banco, API e interface e percorrem os fluxos principais.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # O Chromium do Playwright não vem no runner; a versão é a fixada em e2e/package.json.
+      - run: pnpm --filter @concilia/e2e exec playwright install --with-deps chromium
+
+      - run: pnpm --filter @concilia/e2e test
+        env:
+          TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+      - name: Guardar resultados dos testes em caso de falha
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-resultados
+          path: e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 7
