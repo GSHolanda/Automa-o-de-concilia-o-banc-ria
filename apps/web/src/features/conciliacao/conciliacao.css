@@ -19,7 +19,8 @@
 .conc-item-topo { display: flex; justify-content: space-between; gap: var(--e2); }
 .conc-desc { overflow-wrap: anywhere; }
 .conc-peq { font-size: 12px; }
-.conc-selos { gap: var(--e1); }
+.conc-selos { gap: var(--e1); flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.conc-selos .badge { white-space: normal; max-width: 100%; }
 
 .conc-barra { display: inline-block; width: 120px; max-width: 40%; height: 8px; background: var(--cor-neutro-fundo); border-radius: 999px; overflow: hidden; flex: none; }
 .conc-barra-cheia { display: block; height: 100%; background: var(--cor-primaria); }

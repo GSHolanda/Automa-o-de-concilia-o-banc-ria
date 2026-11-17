@@ -1,4 +1,4 @@
-import { captura, expect, expectNoHorizontalScroll, login, demoEmail, test } from '../support/fixtures';
+import { captura, expect, expectNoHorizontalScroll, login, demoEmail, test, useWideFont } from '../support/fixtures';
 
 test.use({ viewport: { width: 360, height: 740 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
 
@@ -38,6 +38,10 @@ test.describe('9. Celular (360 × 740)', () => {
     // Espera a gaveta terminar de fechar (transição) antes de capturar
     await expect.poll(async () => { const b = await menu.boundingBox(); return b ? b.x + b.width : -1; }).toBeLessThanOrEqual(1);
     await captura(page, 'conciliacao-celular');
+
+    // O layout não pode depender da fonte instalada: repete a conferência com uma fonte mais larga
+    await useWideFont(page);
+    await expectNoHorizontalScroll(page);
 
     // Esc fecha a gaveta
     await abrir.click();

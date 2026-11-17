@@ -68,6 +68,9 @@ export async function loginAs(page: Page, persona: Persona): Promise<void> {
  * sessão. Apagar só o cookie deixaria consultas periódicas chegando ao servidor sem sessão (401 legítimo).
  */
 export async function logout(page: Page): Promise<void> {
+  // Espera a página assentar: sair com consultas ainda a caminho (ex.: logo após um page.goto) faria o servidor
+  // receber requisições sem sessão, o que é legítimo, mas não é o que o teste quer medir.
+  await page.waitForLoadState('networkidle').catch(() => undefined);
   const userButton = page.locator('button.usuario-botao');
   if (await userButton.isVisible().catch(() => false)) {
     await userButton.click();
@@ -87,6 +90,19 @@ export async function expectNoHorizontalScroll(page: Page): Promise<void> {
     client: document.documentElement.clientWidth,
   }));
   expect(widths.scroll, `rolagem horizontal (${widths.scroll} > ${widths.client})`).toBeLessThanOrEqual(widths.client);
+}
+
+/**
+ * Troca a fonte da página por uma mais larga, como as que o sistema operacional usa quando falta a preferida.
+ * Os runners de CI não têm as mesmas fontes do ambiente de desenvolvimento; o layout não pode depender delas.
+ * Usa folha de estilo adotada, permitida pela política de segurança de conteúdo (que bloqueia estilo inline).
+ */
+export async function useWideFont(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync('* { font-family: "DejaVu Sans", Verdana, sans-serif !important; }');
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  });
 }
 
 /** Grava uma captura de tela em docs/capturas/. */
